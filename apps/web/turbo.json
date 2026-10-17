@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build", "@router/api#build"],
+      "outputs": ["dist/**", ".wrangler/deploy/config.json", "src/routeTree.gen.ts"]
+    }
+  }
+}

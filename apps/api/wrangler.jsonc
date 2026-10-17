@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "router-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-12",
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "api.router.agentfan.club", "custom_domain": true }
+  ]
+}

@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
 dist/
+.tanstack/
+.turbo/
 .dev.vars
 .dev.vars.*
 .env

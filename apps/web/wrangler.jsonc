@@ -1,0 +1,14 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "router-web",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "router.agentfan.club", "custom_domain": true }
+  ],
+  "services": [
+    { "binding": "API", "service": "router-api" }
+  ]
+}

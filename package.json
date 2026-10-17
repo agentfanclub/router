@@ -3,19 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.12.1",
+  "workspaces": ["apps/*"],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "typegen": "wrangler types",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "effect": "^4.0.5"
+    "dev": "turbo run dev --filter=@router/web",
+    "dev:api": "turbo run dev --filter=@router/api",
+    "build": "turbo run build",
+    "deploy": "npm run deploy:api && npm run deploy:web",
+    "deploy:api": "turbo run deploy --filter=@router/api",
+    "deploy:web": "turbo run deploy --filter=@router/web",
+    "typegen": "turbo run typegen",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
+    "turbo": "^2.11.9",
     "typescript": "^7.0.2",
     "wrangler": "^4.151.1"
   }

@@ -24,6 +24,7 @@ export const session = sqliteTable("session", {
   ...timestamps,
 }, (table) => [index("session_user_id_idx").on(table.userId)]);
 
+// Better Auth requires this core table even with password and social login disabled.
 export const account = sqliteTable("account", {
   id: text("id").primaryKey(),
   accountId: text("account_id").notNull(),
@@ -39,6 +40,7 @@ export const account = sqliteTable("account", {
   ...timestamps,
 }, (table) => [index("account_user_id_idx").on(table.userId)]);
 
+// Stores expiring sign-in links and OTP hashes, not a separate verification flow.
 export const verification = sqliteTable("verification", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull(),
@@ -46,10 +48,3 @@ export const verification = sqliteTable("verification", {
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   ...timestamps,
 }, (table) => [index("verification_identifier_idx").on(table.identifier)]);
-
-export const rateLimit = sqliteTable("rate_limit", {
-  id: text("id").primaryKey(),
-  key: text("key").notNull().unique(),
-  count: integer("count").notNull(),
-  lastRequest: integer("last_request", { mode: "number" }).notNull(),
-});

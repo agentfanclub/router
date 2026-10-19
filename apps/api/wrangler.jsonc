@@ -15,7 +15,7 @@
   ],
   "vars": {
     "BETTER_AUTH_URL": "https://router.agentfan.club",
-    "RESEND_FROM_EMAIL": "Router <auth@router.agentfan.club>"
+    "RESEND_FROM_EMAIL": "agent fan club <router@agentfan.club>"
   },
   "d1_databases": [
     {

@@ -1,15 +1,21 @@
-import { Effect } from "effect";
+import { env } from "cloudflare:workers";
+import { Effect, Layer } from "effect";
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { createAuth } from "./auth";
 
-export default {
-  async fetch(request, env): Promise<Response> {
-    if (new URL(request.url).pathname.startsWith("/api/auth/")) {
-      return createAuth(env).handler(request);
-    }
-    if (new URL(request.url).pathname !== "/") {
-      return new Response("Not found", { status: 404 });
-    }
+const routes = Layer.mergeAll(
+  HttpRouter.add("*", "/", HttpServerResponse.text("hello world")),
+  HttpRouter.add("*", "/api/auth/*", (request) =>
+    Effect.gen(function* () {
+      const webRequest = yield* HttpServerRequest.toWeb(request);
+      const response = yield* Effect.promise(() => createAuth(env).handler(webRequest));
+      return HttpServerResponse.fromWeb(response);
+    }),
+  ),
+);
 
-    return Effect.runPromise(Effect.sync(() => new Response("hello world")));
-  },
+const app = HttpRouter.toWebHandler(routes.pipe(Layer.provide(HttpServer.layerServices)));
+
+export default {
+  fetch: (request) => app.handler(request),
 } satisfies ExportedHandler<Env>;

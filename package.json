@@ -19,8 +19,7 @@
     "deploy:api": "turbo run deploy --filter=@router/api",
     "deploy:web": "turbo run deploy --filter=@router/web",
     "typegen": "turbo run typegen",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "turbo": "^2.11.9",

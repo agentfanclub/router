@@ -21,7 +21,6 @@ export function isIllinoisEmail(email: string) {
 
 export function createAuth(env: AuthEnv) {
   const resend = new Resend(env.RESEND_API_KEY);
-  const failedDeliveries = new WeakSet<Request>();
   const sendEmail = async (email: string, subject: string, text: string) => {
     if (!isIllinoisEmail(email)) {
       throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID email." });
@@ -38,25 +37,31 @@ export function createAuth(env: AuthEnv) {
     }
   };
 
+  const otpPlugin = emailOTP({
+    disableSignUp: false,
+    otpLength: 6,
+    expiresIn: 300,
+    allowedAttempts: 5,
+    storeOTP: "hashed",
+    // Sign-in emails are sent by the magic link plugin with both credentials.
+    sendVerificationOTP: async () => {
+      throw new APIError("NOT_FOUND", { message: "Not found." });
+    },
+  });
+
   return betterAuth({
     appName: "Router",
     baseURL: env.BETTER_AUTH_URL,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
+    emailAndPassword: { enabled: false },
     trustedOrigins: [new URL(env.BETTER_AUTH_URL).origin],
     database: drizzleAdapter(drizzle(env.DB, { schema }), {
       provider: "sqlite",
       schema,
       transaction: false,
     }),
-    rateLimit: {
-      enabled: true,
-      storage: "database",
-      customRules: {
-        "/email-otp/send-verification-otp": { window: 60, max: 3 },
-        "/sign-in/email-otp": { window: 60, max: 5 },
-      },
-    },
+    rateLimit: { enabled: false },
     advanced: {
       disableOriginCheck: false,
       disableCSRFCheck: false,
@@ -64,9 +69,17 @@ export function createAuth(env: AuthEnv) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path === "/email-otp/send-verification-otp" && ctx.body?.type !== "sign-in") {
-          throw new APIError("BAD_REQUEST", { message: "Only sign-in codes are supported." });
+        // Expose only passwordless sign-in and session management.
+        if (![
+          "/sign-in/magic-link",
+          "/magic-link/verify",
+          "/sign-in/email-otp",
+          "/get-session",
+          "/sign-out",
+        ].includes(ctx.path)) {
+          throw new APIError("NOT_FOUND", { message: "Not found." });
         }
+
         for (const field of ["email", "newEmail"]) {
           const email = ctx.body?.[field];
           if (typeof email === "string" && !isIllinoisEmail(email)) {
@@ -74,53 +87,41 @@ export function createAuth(env: AuthEnv) {
           }
         }
       }),
-      after: createAuthMiddleware(async (ctx) => {
-        // Better Auth catches OTP delivery errors internally. Return a failure to
-        // the caller so the form does not claim a code was sent when Resend failed.
-        if (ctx.request && failedDeliveries.has(ctx.request)) {
-          throw new APIError("INTERNAL_SERVER_ERROR", { message: "We couldn't send your email. Please try again." });
-        }
-      }),
     },
     databaseHooks: {
       user: {
-        create: { before: async (user) => {
-          if (!isIllinoisEmail(user.email)) {
-            throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID email." });
+        create: {
+          before: async (user) => {
+            if (!isIllinoisEmail(user.email)) {
+              throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID email." });
+            }
           }
-        } },
-        update: { before: async (user) => {
-          if (user.email && !isIllinoisEmail(user.email)) {
-            throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID email." });
+        },
+        update: {
+          before: async (user) => {
+            if (user.email && !isIllinoisEmail(user.email)) {
+              throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID email." });
+            }
           }
-        } },
+        },
       },
     },
     plugins: [
       magicLink({
+        disableSignUp: false,
         expiresIn: 300,
         storeToken: "hashed",
-        sendMagicLink: async ({ email, url }) => {
-          await sendEmail(email, "Sign in to Router", `Sign in to Router:\n\n${url}\n\nThis link expires in 5 minutes. If you didn't request it, ignore this email.`);
+        sendMagicLink: async ({ email, url }, ctx) => {
+          if (!ctx) throw new APIError("INTERNAL_SERVER_ERROR");
+          await ctx.context.internalAdapter.deleteVerificationByIdentifier(`sign-in-otp-${email.toLowerCase()}`);
+          const otp = await otpPlugin.endpoints.createVerificationOTP({
+            body: { email, type: "sign-in" },
+            context: ctx.context,
+          });
+          await sendEmail(email, "Sign in to Router", `Click this link to sign in:\n\n${url}\n\nOr enter this code on the sign-in page: ${otp}\n\nBoth expire in 5 minutes. If you didn't request this email, ignore it.`);
         },
       }),
-      emailOTP({
-        otpLength: 6,
-        expiresIn: 300,
-        allowedAttempts: 5,
-        storeOTP: "hashed",
-        sendVerificationOTP: async ({ email, otp, type }, ctx) => {
-          if (type !== "sign-in") {
-            throw new APIError("BAD_REQUEST", { message: "Only sign-in codes are supported." });
-          }
-          try {
-            await sendEmail(email, "Your Router sign-in code", `Your Router sign-in code is ${otp}.\n\nIt expires in 5 minutes. If you didn't request it, ignore this email.`);
-          } catch (error) {
-            if (!ctx?.request) throw error;
-            failedDeliveries.add(ctx.request);
-          }
-        },
-      }),
+      otpPlugin,
     ],
   });
 }

@@ -1,5 +1,6 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { Fragment, useRef, useState, type FormEvent } from "react";
+import { Button } from "../components/button";
 import { authClient } from "../lib/auth-client";
 import { getSession } from "../lib/session";
 
@@ -15,24 +16,37 @@ function Login() {
   const router = useRouter();
   const search = Route.useSearch();
   const [netid, setNetid] = useState("");
-  const [method, setMethod] = useState<"otp" | "link">("otp");
   const [sent, setSent] = useState(false);
-  const [otp, setOtp] = useState("");
+  const [otp, setOtp] = useState<string[]>(Array(6).fill(""));
+  const otpInputs = useRef<(HTMLInputElement | null)[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(search.error ? "That sign-in link is invalid or has expired. Request a new one." : "");
   const email = `${netid.trim().toLowerCase()}@illinois.edu`;
+
+  function enterDigits(value: string, index: number) {
+    const digits = value.replace(/\D/g, "").slice(0, 6);
+    if (value && !digits) return;
+    const start = digits.length === 6 ? 0 : index;
+    setOtp((current) => {
+      const next = [...current];
+      if (!digits) next[index] = "";
+      else for (let offset = 0; offset < digits.length && start + offset < 6; offset++) {
+        next[start + offset] = digits[offset]!;
+      }
+      return next;
+    });
+    if (digits) otpInputs.current[Math.min(start + digits.length, 5)]?.focus();
+  }
 
   async function send(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const result = method === "otp"
-        ? await authClient.emailOtp.sendVerificationOtp({ email, type: "sign-in" })
-        : await authClient.signIn.magicLink({ email, callbackURL: "/", errorCallbackURL: "/login" });
+      const result = await authClient.signIn.magicLink({ email, callbackURL: "/", errorCallbackURL: "/login" });
       if (result.error) throw new Error(result.error.message || "Couldn't send your email.");
       setSent(true);
-      setOtp("");
+      setOtp(Array(6).fill(""));
     } catch (error) {
       setError(error instanceof Error ? error.message : "Couldn't send your email. Try again.");
     } finally {
@@ -45,7 +59,7 @@ function Login() {
     setBusy(true);
     setError("");
     try {
-      const result = await authClient.signIn.emailOtp({ email, otp });
+      const result = await authClient.signIn.emailOtp({ email, otp: otp.join("") });
       if (result.error) throw new Error(result.error.message || "Couldn't verify your code.");
       await router.invalidate();
       await router.navigate({ to: "/" });
@@ -57,44 +71,73 @@ function Login() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-12 text-slate-900">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm" aria-labelledby="login-title">
-        <p className="text-sm font-semibold uppercase tracking-widest text-orange-700">Router</p>
-        <h1 id="login-title" className="mt-6 text-3xl font-semibold tracking-tight">Sign in with your NetID</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">Use your Illinois email to get a sign-in code or magic link. No password needed.</p>
+    <main className="flex min-h-svh items-center justify-center bg-white px-6 py-16 text-neutral-800">
+      <section className="w-full max-w-[360px]" aria-labelledby="login-title">
+        <img src="/agent-fan-club.png" alt="Agent fan club" className="mb-7 -ml-2 h-auto w-40" />
+        <h1 id="login-title" className="text-xl font-medium tracking-tight">{sent ? "Check your email" : "Sign in with your NetID"}</h1>
+        <p className="mt-1 text-[13px] leading-5 text-neutral-500">
+          {sent ? <>Click the link we sent to <span className="break-all text-neutral-700">{email}</span> or enter the code below.</> : "We'll create an account if you don't have one."}
+        </p>
 
         {!sent ? (
-          <form onSubmit={send} className="mt-8 space-y-6">
-            <div>
-              <label htmlFor="netid" className="mb-2 block text-sm font-medium">Illinois NetID</label>
-              <div className="flex rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-orange-600">
-                <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 rounded-l-lg px-3 py-3 outline-none" placeholder="yournetid" />
-                <span id="email-domain" className="flex items-center rounded-r-lg bg-slate-100 px-3 text-sm text-slate-600">@illinois.edu</span>
-              </div>
+          <form onSubmit={send} className="mt-9 space-y-4">
+            <label htmlFor="netid" className="sr-only">Illinois NetID</label>
+            <div className="auth-input flex items-center">
+              <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400" placeholder="netid" />
+              <span id="email-domain" className="pr-3 text-[13px] text-neutral-400">@illinois.edu</span>
             </div>
-            <fieldset disabled={busy}>
-              <legend className="mb-3 text-sm font-medium">How would you like to sign in?</legend>
-              <div className="flex gap-5 text-sm">
-                <label className="flex items-center gap-2"><input type="radio" name="method" value="otp" checked={method === "otp"} onChange={() => setMethod("otp")} />Email code</label>
-                <label className="flex items-center gap-2"><input type="radio" name="method" value="link" checked={method === "link"} onChange={() => setMethod("link")} />Magic link</label>
-              </div>
-            </fieldset>
-            <button disabled={busy} className="w-full rounded-lg bg-orange-700 px-4 py-3 font-medium text-white hover:bg-orange-800 disabled:opacity-50">{busy ? "Sending…" : method === "otp" ? "Send sign-in code" : "Send magic link"}</button>
+            <div className="flex justify-end">
+              <Button type="submit" arrow loading={busy}>Continue</Button>
+            </div>
           </form>
         ) : (
-          <div className="mt-8">
-            <p role="status" className="text-sm leading-6 text-slate-600">{method === "otp" ? "Enter the 6-digit code sent to" : "Open the sign-in link sent to"} <strong className="break-all text-slate-900">{email}</strong>. It expires in 5 minutes.</p>
-            {method === "otp" && (
-              <form onSubmit={verify} className="mt-6 space-y-4">
-                <label htmlFor="otp" className="block text-sm font-medium">Sign-in code</label>
-                <input id="otp" name="otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus disabled={busy} value={otp} onChange={(event) => setOtp(event.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-3 text-center text-2xl tracking-widest focus:ring-2 focus:ring-orange-600" />
-                <button disabled={busy} className="w-full rounded-lg bg-orange-700 px-4 py-3 font-medium text-white hover:bg-orange-800 disabled:opacity-50">{busy ? "Verifying…" : "Sign in"}</button>
-              </form>
-            )}
-            <button type="button" disabled={busy} onClick={() => { setSent(false); setError(""); setOtp(""); }} className="mt-6 text-sm text-orange-800 underline disabled:opacity-50">Try again or change sign-in method</button>
-          </div>
+          <form onSubmit={verify} className="mt-9 space-y-4">
+            <div role="group" aria-label="Sign-in code" aria-describedby="code-expiry" className="flex items-center">
+              {otp.map((digit, index) => (
+                <Fragment key={index}>
+                  {index === 3 && <span aria-hidden="true" className="px-3 text-neutral-400">-</span>}
+                  <input
+                    ref={(input) => { otpInputs.current[index] = input; }}
+                    aria-label={`Digit ${index + 1}`}
+                    name={`otp-${index + 1}`}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete={index === 0 ? "one-time-code" : "off"}
+                    pattern="[0-9]"
+                    maxLength={6}
+                    required
+                    autoFocus={index === 0}
+                    disabled={busy}
+                    value={digit}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => enterDigits(event.target.value, index)}
+                    onPaste={(event) => {
+                      event.preventDefault();
+                      enterDigits(event.clipboardData.getData("text"), index);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Backspace" && !digit && index > 0) {
+                        event.preventDefault();
+                        setOtp((current) => current.map((value, position) => position === index - 1 ? "" : value));
+                        otpInputs.current[index - 1]?.focus();
+                      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                        event.preventDefault();
+                        otpInputs.current[index + (event.key === "ArrowLeft" ? -1 : 1)]?.focus();
+                      }
+                    }}
+                    className="auth-input otp-digit h-11 min-w-0 flex-1 text-center text-lg outline-none disabled:opacity-50"
+                  />
+                </Fragment>
+              ))}
+            </div>
+            <p id="code-expiry" className="text-xs text-neutral-400">The link and code expire in 5 minutes.</p>
+            <div className="flex items-center justify-between gap-4">
+              <button type="button" disabled={busy} onClick={() => { setSent(false); setNetid(""); setError(""); setOtp(Array(6).fill("")); }} className="cursor-pointer text-xs text-neutral-500 underline decoration-neutral-300 underline-offset-4 transition-colors enabled:hover:text-neutral-900 enabled:hover:decoration-neutral-700 disabled:cursor-default disabled:opacity-50 motion-reduce:transition-none">Try another email</button>
+              <Button type="submit" arrow loading={busy}>Sign in</Button>
+            </div>
+          </form>
         )}
-        {error && <p role="alert" className="mt-5 text-sm text-red-700">{error}</p>}
+        {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-700">{error}</p>}
       </section>
     </main>
   );

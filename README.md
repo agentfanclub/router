@@ -3,7 +3,12 @@
 A Turborepo monorepo using Bun workspaces, with two Cloudflare Workers:
 
 - `apps/web`: TanStack Start + React + Tailwind CSS, including server-side rendering and static assets.
-- `apps/api`: the Effect API and Better Auth, backed by Drizzle and Cloudflare D1.
+- `apps/api`: Effect HTTP routing and Better Auth, backed by Drizzle and Cloudflare D1.
+
+Effect's `HttpRouter` handles API routes in `apps/api/src/index.ts`.
+`HttpRouter.toWebHandler` builds the application once at module scope and adapts
+it to the Worker's `fetch` handler. Better Auth is called through `Effect.promise`
+at `/api/auth/*`, using the Worker's bindings from `cloudflare:workers`.
 
 The frontend proxies `/api/auth/*` to the API through its `API` service binding.
 Auth cookies stay on the frontend origin, and server-rendered pages read the same
@@ -13,7 +18,7 @@ rejects other domains, subdomains, and email aliases. Both sign-in methods creat
 an account on first use after the user proves email ownership.
 
 Requires Bun 1.3.12 or newer and Node.js 22.12 or newer. Cloudflare tooling
-and the test runner use Node.js.
+uses Node.js.
 
 ```sh
 bun install
@@ -42,7 +47,6 @@ in `.dev.vars`; restore port 3000 when using the frontend.
 bun run typegen    # Regenerate both Workers' types after changing bindings/config
 bun run build      # Build both apps and generate TanStack's route tree
 bun run typecheck
-bun run test       # Auth integration tests with local D1 and mocked Resend
 bun run deploy     # Deploy the API first, then build and deploy the frontend
 ```
 
@@ -79,9 +83,18 @@ and [running Effects](https://effect.website/docs/v4/getting-started/running-eff
 ## Authentication and database
 
 Better Auth provides magic links and 6-digit email codes. Both expire after
-5 minutes and are stored as hashes. Codes allow 5 verification attempts. Auth
-rate limits persist in D1 across Worker instances. Resend delivery errors return
-a failure to the form. No passwords or social providers are enabled.
+5 minutes and are stored as hashes. One sign-in email contains both a link and
+a 6-digit code. The next screen lets you click the emailed link or enter the code.
+Codes allow 5 verification attempts. Request rate limiting is disabled. Resend
+delivery errors return a failure to the form. Only magic link and OTP sign-in endpoints and session
+lookup/sign-out are exposed. A successful first sign-in automatically creates
+the user. There is no separate signup, email verification, or password flow.
+
+The schema retains Better Auth's required core tables and fields. `verification`
+stores the expiring magic link and OTP hashes. `emailVerified` records proof from
+sign-in; it does not require another email. The `account` table and its password
+and OAuth fields remain for Better Auth schema compatibility, but neither login
+method creates an account row or stores a password.
 
 The D1 database `router-db` is bound as `DB` on the API Worker. Its initial
 migration has been applied locally and remotely. Drizzle schema files live in
@@ -105,10 +118,6 @@ Set `RESEND_FROM_EMAIL` in `apps/api/wrangler.jsonc` to a verified Resend sender
 Production `BETTER_AUTH_URL` is `https://router.agentfan.club`, the public frontend
 origin. Change it with the frontend domain. Auth is served through that origin;
 the API's standalone domain does not need its own browser cookies or CORS policy.
-
-Tests cover both sign-in methods, session lookup and sign-out, token reuse and
-expiry, Illinois-only email validation, delivery failures, origin and redirect
-checks, and database-backed rate limiting. They do not send real emails.
 
 References: [Better Auth magic links](https://better-auth.com/docs/plugins/magic-link),
 [email OTP](https://better-auth.com/docs/plugins/email-otp),

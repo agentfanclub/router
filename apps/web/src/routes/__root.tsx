@@ -3,7 +3,12 @@ import stylesheet from "../styles.css?url";
 
 export const Route = createRootRoute({
   head: () => ({
-    links: [{ rel: "stylesheet", href: stylesheet }],
+    links: [
+      { rel: "preconnect", href: "https://api.fontshare.com" },
+      { rel: "preconnect", href: "https://cdn.fontshare.com", crossOrigin: "anonymous" },
+      { rel: "stylesheet", href: "https://api.fontshare.com/v2/css?f[]=switzer@1&display=swap" },
+      { rel: "stylesheet", href: stylesheet },
+    ],
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },

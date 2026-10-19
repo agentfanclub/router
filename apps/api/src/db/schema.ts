@@ -24,7 +24,7 @@ export const session = sqliteTable("session", {
   ...timestamps,
 }, (table) => [index("session_user_id_idx").on(table.userId)]);
 
-// Better Auth requires this core table even with password and social login disabled.
+// Stores linked sign-in providers for Better Auth.
 export const account = sqliteTable("account", {
   id: text("id").primaryKey(),
   accountId: text("account_id").notNull(),

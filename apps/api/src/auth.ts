@@ -10,6 +10,9 @@ export type AuthEnv = {
   DB: D1Database;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
+  MICROSOFT_CLIENT_ID: string;
+  MICROSOFT_CLIENT_SECRET: string;
+  MICROSOFT_TENANT_ID: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
 };
@@ -55,6 +58,25 @@ export function createAuth(env: AuthEnv) {
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
     emailAndPassword: { enabled: false },
+    socialProviders: {
+      microsoft: {
+        clientId: env.MICROSOFT_CLIENT_ID,
+        clientSecret: env.MICROSOFT_CLIENT_SECRET,
+        tenantId: env.MICROSOFT_TENANT_ID,
+        disableProfilePhoto: true,
+        disableDefaultScope: true,
+        scope: ["openid", "profile", "email"],
+        mapProfileToUser: (profile) => {
+          // Use the university sign-in name, not a configurable contact email.
+          const email = profile.preferred_username?.toLowerCase();
+          if (profile.tid !== env.MICROSOFT_TENANT_ID || !email || !isIllinoisEmail(email)) {
+            throw new APIError("BAD_REQUEST", { message: "Use your Illinois NetID account." });
+          }
+          // Trust the NetID asserted by the university tenant after token validation.
+          return { email, emailVerified: true };
+        },
+      },
+    },
     trustedOrigins: [new URL(env.BETTER_AUTH_URL).origin],
     database: drizzleAdapter(drizzle(env.DB, { schema }), {
       provider: "sqlite",
@@ -69,14 +91,19 @@ export function createAuth(env: AuthEnv) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        // Expose only passwordless sign-in and session management.
+        // Expose only the supported sign-in flows and session management.
         if (![
           "/sign-in/magic-link",
           "/magic-link/verify",
           "/sign-in/email-otp",
+          "/sign-in/social",
+          "/callback/:id",
           "/get-session",
           "/sign-out",
         ].includes(ctx.path)) {
+          throw new APIError("NOT_FOUND", { message: "Not found." });
+        }
+        if (ctx.path === "/callback/:id" && ctx.params?.id !== "microsoft") {
           throw new APIError("NOT_FOUND", { message: "Not found." });
         }
 

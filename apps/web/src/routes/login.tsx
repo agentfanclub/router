@@ -20,7 +20,9 @@ function Login() {
   const [otp, setOtp] = useState<string[]>(Array(6).fill(""));
   const otpInputs = useRef<(HTMLInputElement | null)[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(search.error ? "That sign-in link is invalid or has expired. Request a new one." : "");
+  const [error, setError] = useState(search.error === "account_not_linked"
+    ? "An account already exists for this email. Sign in with an email link or code."
+    : search.error ? "Sign-in failed. Please try again." : "");
   const email = `${netid.trim().toLowerCase()}@illinois.edu`;
 
   function enterDigits(value: string, index: number) {
@@ -54,6 +56,23 @@ function Login() {
     }
   }
 
+  async function signInWithIllinois() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await authClient.signIn.social({
+        provider: "microsoft",
+        callbackURL: "/",
+        errorCallbackURL: "/login",
+      });
+      if (result.error) throw new Error(result.error.message || "Couldn't start Illinois sign-in.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Couldn't start Illinois sign-in. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function verify(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -80,16 +99,29 @@ function Login() {
         </p>
 
         {!sent ? (
-          <form onSubmit={send} className="mt-9 space-y-4">
-            <label htmlFor="netid" className="sr-only">Illinois NetID</label>
-            <div className="auth-input flex items-center">
-              <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400" placeholder="netid" />
-              <span id="email-domain" className="pr-3 text-[13px] text-neutral-400">@illinois.edu</span>
+          <>
+            <div className="mt-8">
+              <Button onClick={signInWithIllinois} loading={busy} className="button-illinois w-full">
+                <img src="/illinois-block-i.svg" alt="" aria-hidden="true" className="h-4 w-auto" />
+                Sign in with Illinois
+              </Button>
             </div>
-            <div className="flex justify-end">
-              <Button type="submit" arrow loading={busy}>Continue</Button>
+            <div className="mt-6 flex items-center gap-3 text-xs text-neutral-400">
+              <span className="h-px flex-1 bg-neutral-200" />
+              <span>or use an email link or code</span>
+              <span className="h-px flex-1 bg-neutral-200" />
             </div>
-          </form>
+            <form onSubmit={send} className="mt-6 space-y-4">
+              <label htmlFor="netid" className="sr-only">Illinois NetID</label>
+              <div className="auth-input flex items-center">
+                <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400" placeholder="netid" />
+                <span id="email-domain" className="pr-3 text-[13px] text-neutral-400">@illinois.edu</span>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" arrow loading={busy}>Continue</Button>
+              </div>
+            </form>
+          </>
         ) : (
           <form onSubmit={verify} className="mt-9 space-y-4">
             <div role="group" aria-label="Sign-in code" aria-describedby="code-expiry" className="flex items-center">

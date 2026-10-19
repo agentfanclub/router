@@ -31,6 +31,8 @@ bun run dev
 Set `BETTER_AUTH_SECRET` to a random value of at least 32 characters,
 `RESEND_API_KEY` to your Resend API key, and `RESEND_FROM_EMAIL` to an address on
 a domain verified in Resend. Keep `BETTER_AUTH_URL=http://localhost:3000` locally.
+Set `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, and `MICROSOFT_CLIENT_SECRET`
+for Illinois sign-in. The Azure app is restricted to the university tenant.
 `bun install --frozen-lockfile` installs the committed dependency versions in CI.
 `.dev.vars` is ignored by Git. The example contains placeholders, not working credentials.
 
@@ -114,12 +116,23 @@ Before deploying auth, set the API Worker's secrets:
 cd apps/api
 bunx --no-install wrangler secret put BETTER_AUTH_SECRET
 bunx --no-install wrangler secret put RESEND_API_KEY
+bunx --no-install wrangler secret put MICROSOFT_CLIENT_ID
+bunx --no-install wrangler secret put MICROSOFT_TENANT_ID
+bunx --no-install wrangler secret put MICROSOFT_CLIENT_SECRET
 ```
 
 Set `RESEND_FROM_EMAIL` in `apps/api/wrangler.jsonc` to a verified Resend sender.
 Production `BETTER_AUTH_URL` is `https://router.agentfan.club`, the public frontend
 origin. Change it with the frontend domain. Auth is served through that origin;
 the API's standalone domain does not need its own browser cookies or CORS policy.
+
+The Azure app's Web redirect URIs are
+`https://router.agentfan.club/api/auth/callback/microsoft` and
+`http://localhost:3000/api/auth/callback/microsoft`.
+Microsoft sign-in uses the university NetID sign-in name and a stable Microsoft
+account ID. A validated university token with an Illinois NetID sign-in name is
+treated as email-verified. Sign-in automatically links to an existing account
+with the same verified email; unverified local accounts are not automatically linked.
 
 References: [Better Auth magic links](https://better-auth.com/docs/plugins/magic-link),
 [email OTP](https://better-auth.com/docs/plugins/email-otp),

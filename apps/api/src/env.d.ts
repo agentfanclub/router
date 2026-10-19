@@ -3,6 +3,9 @@ declare namespace Cloudflare {
   interface Env {
     BETTER_AUTH_SECRET: string;
     RESEND_API_KEY: string;
+    MICROSOFT_CLIENT_ID: string;
+    MICROSOFT_CLIENT_SECRET: string;
+    MICROSOFT_TENANT_ID: string;
   }
 }
 

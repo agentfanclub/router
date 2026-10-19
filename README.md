@@ -85,6 +85,8 @@ and [running Effects](https://effect.website/docs/v4/getting-started/running-eff
 Better Auth provides magic links and 6-digit email codes. Both expire after
 5 minutes and are stored as hashes. One sign-in email contains both a link and
 a 6-digit code. The next screen lets you click the emailed link or enter the code.
+Emailed links open a confirmation page and redeem the token only when the user
+presses "Sign in", so a scanner fetching the page does not consume the link.
 Codes allow 5 verification attempts. Request rate limiting is disabled. Resend
 delivery errors return a failure to the form. Only magic link and OTP sign-in endpoints and session
 lookup/sign-out are exposed. A successful first sign-in automatically creates

@@ -111,14 +111,17 @@ export function createAuth(env: AuthEnv) {
         disableSignUp: false,
         expiresIn: 300,
         storeToken: "hashed",
-        sendMagicLink: async ({ email, url }, ctx) => {
+        sendMagicLink: async ({ email, url, token }, ctx) => {
           if (!ctx) throw new APIError("INTERNAL_SERVER_ERROR");
           await ctx.context.internalAdapter.deleteVerificationByIdentifier(`sign-in-otp-${email.toLowerCase()}`);
           const otp = await otpPlugin.endpoints.createVerificationOTP({
             body: { email, type: "sign-in" },
             context: ctx.context,
           });
-          await sendEmail(email, "Sign in to Router", `Click this link to sign in:\n\n${url}\n\nOr enter this code on the sign-in page: ${otp}\n\nBoth expire in 5 minutes. If you didn't request this email, ignore it.`);
+          // Email scanners can open links. Redeem the token only after a button click.
+          const confirmationURL = new URL("/login/verify", url);
+          confirmationURL.searchParams.set("token", token);
+          await sendEmail(email, "Sign in to Router", `Click this link to sign in:\n\n${confirmationURL}\n\nOr enter this code on the sign-in page: ${otp}\n\nBoth expire in 5 minutes. If you didn't request this email, ignore it.`);
         },
       }),
       otpPlugin,

@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     cloudflare({
+      persistState: { path: "../api/.wrangler/state" },
       viteEnvironment: { name: "ssr" },
       auxiliaryWorkers: [{ configPath: "../api/wrangler.jsonc" }],
     }),

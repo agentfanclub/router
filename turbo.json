@@ -16,6 +16,9 @@
       "dependsOn": ["build"],
       "outputs": []
     },
+    "test": {
+      "outputs": []
+    },
     "typegen": {
       "cache": false
     },

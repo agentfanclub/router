@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "npm@11.12.1",
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },
@@ -16,7 +18,8 @@
     "deploy:api": "turbo run deploy --filter=@router/api",
     "deploy:web": "turbo run deploy --filter=@router/web",
     "typegen": "turbo run typegen",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
   },
   "devDependencies": {
     "turbo": "^2.11.9",

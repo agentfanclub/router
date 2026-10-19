@@ -5,6 +5,24 @@
   "compatibility_date": "2026-10-12",
   "workers_dev": true,
   "routes": [
-    { "pattern": "api.router.agentfan.club", "custom_domain": true }
+    {
+      "pattern": "api.router.agentfan.club",
+      "custom_domain": true
+    }
+  ],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://router.agentfan.club",
+    "RESEND_FROM_EMAIL": "Router <auth@router.agentfan.club>"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "router-db",
+      "database_id": "138dd66b-9f20-4040-b9be-aff881f951dd",
+      "migrations_dir": "drizzle"
+    }
   ]
 }

@@ -1,6 +1,6 @@
 # Router
 
-A Turborepo monorepo using npm workspaces, with two Cloudflare Workers:
+A Turborepo monorepo using Bun workspaces, with two Cloudflare Workers:
 
 - `apps/web`: TanStack Start + React + Tailwind CSS, including server-side rendering and static assets.
 - `apps/api`: the Effect API and Better Auth, backed by Drizzle and Cloudflare D1.
@@ -12,19 +12,21 @@ The login form accepts a NetID with a fixed `@illinois.edu` suffix. The API also
 rejects other domains, subdomains, and email aliases. Both sign-in methods create
 an account on first use after the user proves email ownership.
 
-Requires Node.js 22.12 or newer.
+Requires Bun 1.3.12 or newer and Node.js 22.12 or newer. Cloudflare tooling
+and the test runner use Node.js.
 
 ```sh
-npm install
+bun install
 cp apps/api/.env.example apps/api/.dev.vars
 # Set the values in .dev.vars before starting.
-npm run db:migrate:local -w @router/api
-npm run dev
+bun run --filter @router/api db:migrate:local
+bun run dev
 ```
 
 Set `BETTER_AUTH_SECRET` to a random value of at least 32 characters,
 `RESEND_API_KEY` to your Resend API key, and `RESEND_FROM_EMAIL` to an address on
 a domain verified in Resend. Keep `BETTER_AUTH_URL=http://localhost:3000` locally.
+`bun install --frozen-lockfile` installs the committed dependency versions in CI.
 `.dev.vars` is ignored by Git. The example contains placeholders, not working credentials.
 
 Visit http://localhost:3000/. The Cloudflare Vite plugin starts both Workers in
@@ -32,16 +34,16 @@ the local Workers runtime and connects the service binding. You do not need a
 second terminal. Vite and standalone Wrangler share the API's
 `apps/api/.wrangler/state` directory so both use the same local D1 database.
 
-To run just the API, use `npm run dev:api` and visit http://localhost:8787/.
+To run just the API, use `bun run dev:api` and visit http://localhost:8787/.
 For direct auth testing on that port, set `BETTER_AUTH_URL=http://localhost:8787`
 in `.dev.vars`; restore port 3000 when using the frontend.
 
 ```sh
-npm run typegen    # Regenerate both Workers' types after changing bindings/config
-npm run build     # Build both apps and generate TanStack's route tree
-npm run typecheck
-npm test          # Auth integration tests with local D1 and mocked Resend
-npm run deploy    # Deploy the API first, then build and deploy the frontend
+bun run typegen    # Regenerate both Workers' types after changing bindings/config
+bun run build      # Build both apps and generate TanStack's route tree
+bun run typecheck
+bun run test       # Auth integration tests with local D1 and mocked Resend
+bun run deploy     # Deploy the API first, then build and deploy the frontend
 ```
 
 Turborepo runs and caches builds and typechecks. Typechecking builds first to
@@ -49,8 +51,8 @@ generate TanStack's route tree. The frontend build depends on the API build
 because the Cloudflare Vite plugin includes the API as an auxiliary Worker.
 Cached frontend builds also restore Wrangler's deployment configuration.
 
-`npm run dev` runs the frontend's persistent Turbo task, which starts both Workers
-through Vite. `npm run dev:api` starts only the API. Deploy and type generation
+`bun run dev` runs the frontend's persistent Turbo task, which starts both Workers
+through Vite. `bun run dev:api` starts only the API. Deploy and type generation
 tasks always run. Use the root deploy commands so Turbo builds before deploying.
 
 Tailwind uses `@tailwindcss/vite` and `apps/web/src/styles.css`. Add utility classes
@@ -61,7 +63,7 @@ The Worker names are `router-api` and `router-web`, configured in each app's
 frontend and https://api.router.agentfan.club for the API. Wrangler manages the
 custom domain DNS records and certificates. The `workers.dev` URLs also remain enabled.
 Deployment requires a Cloudflare account and Wrangler login.
-For separate releases, use `npm run deploy:api` or `npm run deploy:web`. Deploy
+For separate releases, use `bun run deploy:api` or `bun run deploy:web`. Deploy
 the API before the frontend on the first release so its service binding resolves.
 
 `worker-configuration.d.ts` files and `apps/web/src/routeTree.gen.ts` are generated.
@@ -86,17 +88,17 @@ migration has been applied locally and remotely. Drizzle schema files live in
 `apps/api/src/db/schema.ts`; commit the generated SQL and snapshots after changes.
 
 ```sh
-npm run db:generate -w @router/api
-npm run db:migrate:local -w @router/api
-npm run db:migrate:remote -w @router/api
+bun run --filter @router/api db:generate
+bun run --filter @router/api db:migrate:local
+bun run --filter @router/api db:migrate:remote
 ```
 
 Before deploying auth, set the API Worker's secrets:
 
 ```sh
 cd apps/api
-npx wrangler secret put BETTER_AUTH_SECRET
-npx wrangler secret put RESEND_API_KEY
+bunx --no-install wrangler secret put BETTER_AUTH_SECRET
+bunx --no-install wrangler secret put RESEND_API_KEY
 ```
 
 Set `RESEND_FROM_EMAIL` in `apps/api/wrangler.jsonc` to a verified Resend sender.

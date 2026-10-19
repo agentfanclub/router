@@ -63,6 +63,7 @@ export function createAuth(env: AuthEnv) {
         clientId: env.MICROSOFT_CLIENT_ID,
         clientSecret: env.MICROSOFT_CLIENT_SECRET,
         tenantId: env.MICROSOFT_TENANT_ID,
+        prompt: "select_account",
         disableProfilePhoto: true,
         disableDefaultScope: true,
         scope: ["openid", "profile", "email"],

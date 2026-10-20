@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Brain, Check, Copy, Image, Terminal, Type } from "lucide-react";
+import { Brain, Check, Copy, Image, Minus, Terminal, Type } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import { useEffect, useState } from "react";
 
@@ -45,7 +45,7 @@ function Page() {
         </p>
         <div className="mb-6">
           <h1 className="text-lg font-medium">Models</h1>
-          <p className="mt-1 text-sm text-neutral-500">Sample model catalog. Prices in USD per million tokens.</p>
+          <p className="mt-1 text-sm text-neutral-500">Prices in USD per million tokens.</p>
         </div>
 
         <div className="max-w-[960px] overflow-x-auto rounded-[14px] bg-[#eeeeee] p-[2px]">
@@ -118,8 +118,8 @@ function Page() {
                     })}
                   </td>
                   {[model.input, model.output, model.cacheRead, model.cacheWrite].map((price, index) => (
-                    <td key={index} className={`px-4 py-3 tabular-nums last:pr-6 ${price === null ? "text-center" : "text-right"}`}>
-                      {price === null ? <span aria-label="Not available">-</span> : priceFormatter.format(price)}
+                    <td key={index} className="px-4 py-3 text-right tabular-nums last:pr-6">
+                      {price === null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
                     </td>
                   ))}
                 </tr>

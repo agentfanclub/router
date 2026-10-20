@@ -14,6 +14,16 @@ export const user = sqliteTable("user", {
   ...timestamps,
 });
 
+export const apiKey = sqliteTable("api_key", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  hash: text("hash").notNull().unique(),
+  lastFive: text("last_five").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  ...timestamps,
+}, (table) => [index("api_key_user_id_idx").on(table.userId)]);
+
 export const session = sqliteTable("session", {
   id: text("id").primaryKey(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),

@@ -2,11 +2,15 @@ import { env } from "cloudflare:workers";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { createAuth } from "./auth";
+import { apiKeyRoutes } from "./routes/api-keys";
+import { WorkerEnv } from "./worker-env";
 
 const routes = Layer.mergeAll(
-  HttpRouter.add("*", "/", HttpServerResponse.text("hello world")),
+  apiKeyRoutes,
+  HttpRouter.add("*", "/health", HttpServerResponse.text("OK")),
   HttpRouter.add("*", "/api/auth/*", (request) =>
     Effect.gen(function* () {
+      const env = yield* WorkerEnv;
       const webRequest = yield* HttpServerRequest.toWeb(request);
       const response = yield* Effect.promise(() => createAuth(env).handler(webRequest));
       return HttpServerResponse.fromWeb(response);
@@ -14,7 +18,10 @@ const routes = Layer.mergeAll(
   ),
 );
 
-const app = HttpRouter.toWebHandler(routes.pipe(Layer.provide(HttpServer.layerServices)));
+const app = HttpRouter.toWebHandler(routes.pipe(
+  Layer.provide(HttpServer.layerServices),
+  Layer.provideMerge(Layer.succeed(WorkerEnv, env)),
+));
 
 export default {
   fetch: (request) => app.handler(request),

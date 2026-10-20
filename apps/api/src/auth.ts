@@ -5,24 +5,14 @@ import { emailOTP, magicLink } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import { Resend } from "resend";
 import * as schema from "./db/schema";
-
-export type AuthEnv = {
-  DB: D1Database;
-  BETTER_AUTH_URL: string;
-  BETTER_AUTH_SECRET: string;
-  MICROSOFT_CLIENT_ID: string;
-  MICROSOFT_CLIENT_SECRET: string;
-  MICROSOFT_TENANT_ID: string;
-  RESEND_API_KEY: string;
-  RESEND_FROM_EMAIL: string;
-};
+import type { ApiEnv } from "./env";
 
 // Match the NetID form as well as the exact domain. Subdomains and aliases are excluded.
 export function isIllinoisEmail(email: string) {
   return /^[a-z][a-z0-9]*@illinois\.edu$/i.test(email);
 }
 
-export function createAuth(env: AuthEnv) {
+export function createAuth(env: ApiEnv) {
   const resend = new Resend(env.RESEND_API_KEY);
   const sendEmail = async (email: string, subject: string, text: string) => {
     if (!isIllinoisEmail(email)) {

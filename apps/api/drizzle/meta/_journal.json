@@ -15,6 +15,13 @@
       "when": 1792437348065,
       "tag": "0001_numerous_mikhail_rasputin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792464572325,
+      "tag": "0002_breezy_punisher",
+      "breakpoints": true
     }
   ]
 }

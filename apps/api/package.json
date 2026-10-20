@@ -20,6 +20,7 @@
     "resend": "^6.34.1"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "drizzle-kit": "^0.31.11",
     "typescript": "^7.0.2",
     "wrangler": "^4.151.1"

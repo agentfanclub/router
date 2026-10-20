@@ -1,4 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { RouteGame } from "../components/route-game";
 import stylesheet from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -16,6 +17,7 @@ export const Route = createRootRoute({
     ],
   }),
   component: Root,
+  notFoundComponent: RouteGame,
 });
 
 function Root() {

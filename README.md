@@ -112,8 +112,11 @@ bun run --filter @router/api db:migrate:remote
 ```
 
 Users have a `role` of `admin` or `user`, with `user` as the default for existing
-and new accounts. Admins can open the Users tab to view all users and their roles.
-The API also restricts this list to admins. Roles cannot be set through sign-in
+and new accounts. Admins can open the Admin tab to view all users and their roles,
+plus cumulative Lumen usage, coin spend, available coins, and the last-used time.
+`GET /api/admin/users` and `GET /api/admin/lumen-usage` require an admin session.
+Lumen usage is for the router's shared `LUMEN_API_KEY`; the available coin balance
+is shared across its owning Lumen account. Roles cannot be set through sign-in
 requests. To grant admin access, update the account directly in D1 after applying
 the migrations:
 

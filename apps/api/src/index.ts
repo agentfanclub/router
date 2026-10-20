@@ -3,12 +3,12 @@ import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { createAuth } from "./auth";
 import { apiKeyRoutes } from "./routes/api-keys";
-import { userRoutes } from "./routes/users";
+import { adminRoutes } from "./routes/admin";
 import { WorkerEnv } from "./worker-env";
 
 const routes = Layer.mergeAll(
   apiKeyRoutes,
-  userRoutes,
+  adminRoutes,
   HttpRouter.add("*", "/health", HttpServerResponse.text("OK")),
   HttpRouter.add("*", "/api/auth/*", (request) =>
     Effect.gen(function* () {

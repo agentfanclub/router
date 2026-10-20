@@ -81,7 +81,7 @@ function Dashboard() {
           ))}
           {user.role === "admin" && (
             <Link to="/users" activeOptions={{ exact: true }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
-              Users
+              Admin
             </Link>
           )}
         </nav>

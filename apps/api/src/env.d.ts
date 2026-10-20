@@ -1,4 +1,5 @@
 export interface Secrets {
+  LUMEN_API_KEY: string;
   BETTER_AUTH_SECRET: string;
   RESEND_API_KEY: string;
   MICROSOFT_CLIENT_ID: string;

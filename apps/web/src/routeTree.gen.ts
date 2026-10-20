@@ -9,20 +9,49 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as DashboardRouteImport } from './routes/_dashboard'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DashboardIndexRouteImport } from './routes/_dashboard.index'
+import { Route as DashboardApiKeysRouteImport } from './routes/_dashboard.api-keys'
+import { Route as DashboardConnectionsRouteImport } from './routes/_dashboard.connections'
+import { Route as DashboardLogsRouteImport } from './routes/_dashboard.logs'
+import { Route as DashboardModelsRouteImport } from './routes/_dashboard.models'
 import { Route as LoginVerifyRouteImport } from './routes/login_.verify'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/_dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardIndexRoute = DashboardIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardApiKeysRoute = DashboardApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardConnectionsRoute = DashboardConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardLogsRoute = DashboardLogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardModelsRoute = DashboardModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => DashboardRoute,
 } as any)
 const LoginVerifyRoute = LoginVerifyRouteImport.update({
   id: '/login_/verify',
@@ -36,34 +65,73 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof DashboardIndexRoute
   '/login': typeof LoginRoute
+  '/api-keys': typeof DashboardApiKeysRoute
+  '/connections': typeof DashboardConnectionsRoute
+  '/logs': typeof DashboardLogsRoute
+  '/models': typeof DashboardModelsRoute
   '/login/verify': typeof LoginVerifyRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/api-keys': typeof DashboardApiKeysRoute
+  '/connections': typeof DashboardConnectionsRoute
+  '/logs': typeof DashboardLogsRoute
+  '/models': typeof DashboardModelsRoute
   '/login/verify': typeof LoginVerifyRoute
+  '/': typeof DashboardIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_dashboard': typeof DashboardRouteWithChildren
   '/login': typeof LoginRoute
+  '/_dashboard/api-keys': typeof DashboardApiKeysRoute
+  '/_dashboard/connections': typeof DashboardConnectionsRoute
+  '/_dashboard/logs': typeof DashboardLogsRoute
+  '/_dashboard/models': typeof DashboardModelsRoute
   '/login_/verify': typeof LoginVerifyRoute
+  '/_dashboard/': typeof DashboardIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/login/verify' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/api-keys'
+    | '/connections'
+    | '/logs'
+    | '/models'
+    | '/login/verify'
+    | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/login/verify' | '/api/auth/$'
-  id: '__root__' | '/' | '/login' | '/login_/verify' | '/api/auth/$'
+  to:
+    | '/login'
+    | '/api-keys'
+    | '/connections'
+    | '/logs'
+    | '/models'
+    | '/login/verify'
+    | '/'
+    | '/api/auth/$'
+  id:
+    | '__root__'
+    | '/_dashboard'
+    | '/login'
+    | '/_dashboard/api-keys'
+    | '/_dashboard/connections'
+    | '/_dashboard/logs'
+    | '/_dashboard/models'
+    | '/login_/verify'
+    | '/_dashboard/'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  DashboardRoute: typeof DashboardRouteWithChildren
   LoginRoute: typeof LoginRoute
   LoginVerifyRoute: typeof LoginVerifyRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -71,11 +139,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_dashboard': {
+      id: '/_dashboard'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -84,6 +152,41 @@ declare module '@tanstack/react-router' {
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_dashboard/': {
+      id: '/_dashboard/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof DashboardIndexRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/_dashboard/api-keys': {
+      id: '/_dashboard/api-keys'
+      path: '/api-keys'
+      fullPath: '/api-keys'
+      preLoaderRoute: typeof DashboardApiKeysRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/_dashboard/connections': {
+      id: '/_dashboard/connections'
+      path: '/connections'
+      fullPath: '/connections'
+      preLoaderRoute: typeof DashboardConnectionsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/_dashboard/logs': {
+      id: '/_dashboard/logs'
+      path: '/logs'
+      fullPath: '/logs'
+      preLoaderRoute: typeof DashboardLogsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/_dashboard/models': {
+      id: '/_dashboard/models'
+      path: '/models'
+      fullPath: '/models'
+      preLoaderRoute: typeof DashboardModelsRouteImport
+      parentRoute: typeof DashboardRoute
     }
     '/login_/verify': {
       id: '/login_/verify'
@@ -102,8 +205,28 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface DashboardRouteChildren {
+  DashboardApiKeysRoute: typeof DashboardApiKeysRoute
+  DashboardConnectionsRoute: typeof DashboardConnectionsRoute
+  DashboardLogsRoute: typeof DashboardLogsRoute
+  DashboardModelsRoute: typeof DashboardModelsRoute
+  DashboardIndexRoute: typeof DashboardIndexRoute
+}
+
+const DashboardRouteChildren: DashboardRouteChildren = {
+  DashboardApiKeysRoute: DashboardApiKeysRoute,
+  DashboardConnectionsRoute: DashboardConnectionsRoute,
+  DashboardLogsRoute: DashboardLogsRoute,
+  DashboardModelsRoute: DashboardModelsRoute,
+  DashboardIndexRoute: DashboardIndexRoute,
+}
+
+const DashboardRouteWithChildren = DashboardRoute._addFileChildren(
+  DashboardRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  DashboardRoute: DashboardRouteWithChildren,
   LoginRoute: LoginRoute,
   LoginVerifyRoute: LoginVerifyRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

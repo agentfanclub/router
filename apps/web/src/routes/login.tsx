@@ -101,7 +101,7 @@ function Login() {
         {!sent ? (
           <>
             <div className="mt-8">
-              <Button onClick={signInWithIllinois} loading={busy} className="button-illinois w-full">
+              <Button onClick={signInWithIllinois} loading={busy} variant="illinois" className="w-full">
                 <img src="/illinois-block-i.svg" alt="" aria-hidden="true" className="h-4 w-auto" />
                 Sign in with Illinois
               </Button>
@@ -113,7 +113,7 @@ function Login() {
             </div>
             <form onSubmit={send} className="mt-6 space-y-4">
               <label htmlFor="netid" className="sr-only">Illinois NetID</label>
-              <div className="auth-input flex items-center">
+              <div className="flex items-center rounded-[5px] border border-neutral-300 bg-linear-to-b from-neutral-50 to-white shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] focus-within:border-neutral-500 ">
                 <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400" placeholder="netid" />
                 <span id="email-domain" className="pr-3 text-[13px] text-neutral-400">@illinois.edu</span>
               </div>
@@ -157,7 +157,7 @@ function Login() {
                         otpInputs.current[index + (event.key === "ArrowLeft" ? -1 : 1)]?.focus();
                       }
                     }}
-                    className="auth-input otp-digit h-11 min-w-0 flex-1 text-center text-lg outline-none disabled:opacity-50"
+                    className="h-11 min-w-0 flex-1 rounded-none border border-neutral-300 bg-linear-to-b from-neutral-50 to-white text-center text-lg shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] outline-none focus:relative focus:z-1 focus:border-neutral-500 disabled:opacity-50 [&:nth-of-type(3n+1)]:rounded-l-[5px] [&:nth-of-type(3n)]:rounded-r-[5px] [&:not(:nth-of-type(3n+1))]:-ml-px"
                   />
                 </Fragment>
               ))}

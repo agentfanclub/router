@@ -146,7 +146,7 @@ function Page() {
 
       {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
 
-      <div className="max-w-[960px] overflow-x-auto rounded-[14px] bg-[#eeeeee] p-[2px]">
+      <div className="dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]">
         <table className="dashboard-table api-keys-table w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
           <caption className="sr-only">API keys with their name, masked token, creation date, and enabled status.</caption>
           <thead>

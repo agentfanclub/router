@@ -48,6 +48,16 @@ export function createAuth(env: ApiEnv) {
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
     emailAndPassword: { enabled: false },
+    user: {
+      additionalFields: {
+        role: {
+          type: [...schema.userRoles],
+          required: true,
+          defaultValue: "user",
+          input: false,
+        },
+      },
+    },
     socialProviders: {
       microsoft: {
         clientId: env.MICROSOFT_CLIENT_ID,

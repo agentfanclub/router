@@ -16,6 +16,7 @@ import { Route as DashboardApiKeysRouteImport } from './routes/_dashboard.api-ke
 import { Route as DashboardConnectionsRouteImport } from './routes/_dashboard.connections'
 import { Route as DashboardLogsRouteImport } from './routes/_dashboard.logs'
 import { Route as DashboardModelsRouteImport } from './routes/_dashboard.models'
+import { Route as DashboardUsersRouteImport } from './routes/_dashboard.users'
 import { Route as LoginVerifyRouteImport } from './routes/login_.verify'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -53,6 +54,11 @@ const DashboardModelsRoute = DashboardModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardUsersRoute = DashboardUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => DashboardRoute,
+} as any)
 const LoginVerifyRoute = LoginVerifyRouteImport.update({
   id: '/login_/verify',
   path: '/login/verify',
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
+  '/users': typeof DashboardUsersRoute
   '/login/verify': typeof LoginVerifyRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
+  '/users': typeof DashboardUsersRoute
   '/login/verify': typeof LoginVerifyRoute
   '/': typeof DashboardIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/_dashboard/connections': typeof DashboardConnectionsRoute
   '/_dashboard/logs': typeof DashboardLogsRoute
   '/_dashboard/models': typeof DashboardModelsRoute
+  '/_dashboard/users': typeof DashboardUsersRoute
   '/login_/verify': typeof LoginVerifyRoute
   '/_dashboard/': typeof DashboardIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/logs'
     | '/models'
+    | '/users'
     | '/login/verify'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/logs'
     | '/models'
+    | '/users'
     | '/login/verify'
     | '/'
     | '/api/auth/$'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/_dashboard/connections'
     | '/_dashboard/logs'
     | '/_dashboard/models'
+    | '/_dashboard/users'
     | '/login_/verify'
     | '/_dashboard/'
     | '/api/auth/$'
@@ -188,6 +200,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardModelsRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/_dashboard/users': {
+      id: '/_dashboard/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof DashboardUsersRouteImport
+      parentRoute: typeof DashboardRoute
+    }
     '/login_/verify': {
       id: '/login_/verify'
       path: '/login/verify'
@@ -210,6 +229,7 @@ interface DashboardRouteChildren {
   DashboardConnectionsRoute: typeof DashboardConnectionsRoute
   DashboardLogsRoute: typeof DashboardLogsRoute
   DashboardModelsRoute: typeof DashboardModelsRoute
+  DashboardUsersRoute: typeof DashboardUsersRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
 }
 
@@ -218,6 +238,7 @@ const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardConnectionsRoute: DashboardConnectionsRoute,
   DashboardLogsRoute: DashboardLogsRoute,
   DashboardModelsRoute: DashboardModelsRoute,
+  DashboardUsersRoute: DashboardUsersRoute,
   DashboardIndexRoute: DashboardIndexRoute,
 }
 

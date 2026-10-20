@@ -1,4 +1,7 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const userRoles = ["admin", "user"] as const;
 
 const timestamps = {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
@@ -11,8 +14,9 @@ export const user = sqliteTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
   image: text("image"),
+  role: text("role", { enum: userRoles }).notNull().default("user"),
   ...timestamps,
-});
+}, (table) => [check("user_role_check", sql`${table.role} in ('admin', 'user')`)]);
 
 export const apiKey = sqliteTable("api_key", {
   id: text("id").primaryKey(),

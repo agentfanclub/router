@@ -110,6 +110,19 @@ bun run --filter @router/api db:migrate:local
 bun run --filter @router/api db:migrate:remote
 ```
 
+Users have a `role` of `admin` or `user`, with `user` as the default for existing
+and new accounts. Admins can open the Users tab to view all users and their roles.
+The API also restricts this list to admins. Roles cannot be set through sign-in
+requests. To grant admin access, update the account directly in D1 after applying
+the migrations:
+
+```sh
+cd apps/api
+bunx --no-install wrangler d1 execute DB --local --command "UPDATE user SET role = 'admin' WHERE email = 'your-netid@illinois.edu';"
+```
+
+Use `--remote` instead of `--local` for the deployed database.
+
 Before deploying auth, set the API Worker's secrets:
 
 ```sh

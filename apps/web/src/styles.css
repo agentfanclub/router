@@ -9,6 +9,15 @@
   outline: none;
 }
 
+.dashboard-table-frame {
+  --table-radius: 14px;
+  --table-padding: 2px;
+  --table-inner-radius: calc(var(--table-radius) - var(--table-padding));
+  --table-row-inset: 6px;
+  border-radius: var(--table-radius);
+  padding: var(--table-padding);
+}
+
 /* Shared columns keep the inset row backgrounds clear of the table edges. */
 .dashboard-table,
 .dashboard-table thead,
@@ -29,12 +38,16 @@
   grid-template-columns: minmax(220px, 1fr) 148px repeat(3, 124px) 132px;
 }
 
+.users-table tr {
+  grid-template-columns: minmax(140px, 1fr) minmax(240px, 2fr) 120px;
+}
+
 .dashboard-table tbody {
-  border-radius: 11px;
+  border-radius: var(--table-inner-radius);
 }
 
 .dashboard-table tbody:has(> tr:nth-child(even):last-child) {
-  padding-bottom: 6px;
+  padding-bottom: var(--table-row-inset);
 }
 
 .dashboard-table tbody[data-single-row="true"] {
@@ -48,8 +61,8 @@
 .dashboard-table tbody tr:nth-child(even)::before {
   content: "";
   position: absolute;
-  inset: 0 6px;
-  border-radius: 8px;
+  inset: 0 var(--table-row-inset);
+  border-radius: calc(var(--table-inner-radius) - var(--table-row-inset));
   background: #f7f7f7;
 }
 

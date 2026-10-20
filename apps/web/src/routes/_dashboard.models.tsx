@@ -48,7 +48,7 @@ function Page() {
           <p className="mt-1 text-sm text-neutral-500">Prices in USD per million tokens.</p>
         </div>
 
-        <div className="max-w-[960px] overflow-x-auto rounded-[14px] bg-[#eeeeee] p-[2px]">
+        <div className="dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]">
           <table className="dashboard-table models-table w-full min-w-[872px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
             <caption className="sr-only">Sample models with their IDs, features, and prices in USD per million tokens.</caption>
             <thead>

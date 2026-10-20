@@ -22,6 +22,13 @@
       "when": 1792464572325,
       "tag": "0002_breezy_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792470773802,
+      "tag": "0003_sudden_reaper",
+      "breakpoints": true
     }
   ]
 }

@@ -10,35 +10,42 @@
 }
 
 /* Shared columns keep the inset row backgrounds clear of the table edges. */
-.api-keys-table,
-.api-keys-table thead,
-.api-keys-table tbody {
+.dashboard-table,
+.dashboard-table thead,
+.dashboard-table tbody {
   display: block;
 }
 
-.api-keys-table tr {
+.dashboard-table tr {
   display: grid;
-  grid-template-columns: 26% 34% minmax(0, 1fr) 100px 48px;
   align-items: center;
 }
 
-.api-keys-table tbody {
+.api-keys-table tr {
+  grid-template-columns: 26% 34% minmax(0, 1fr) 100px 48px;
+}
+
+.models-table tr {
+  grid-template-columns: minmax(220px, 1fr) 148px repeat(3, 124px) 132px;
+}
+
+.dashboard-table tbody {
   border-radius: 11px;
 }
 
-.api-keys-table tbody:has(> tr:nth-child(even):last-child) {
+.dashboard-table tbody:has(> tr:nth-child(even):last-child) {
   padding-bottom: 6px;
 }
 
-.api-keys-table tbody[data-single-row="true"] {
+.dashboard-table tbody[data-single-row="true"] {
   padding-block: 3px;
 }
 
-.api-keys-table tbody tr {
+.dashboard-table tbody tr {
   position: relative;
 }
 
-.api-keys-table tbody tr:nth-child(even)::before {
+.dashboard-table tbody tr:nth-child(even)::before {
   content: "";
   position: absolute;
   inset: 0 6px;
@@ -46,6 +53,6 @@
   background: #f7f7f7;
 }
 
-.api-keys-table tbody td {
+.dashboard-table tbody td {
   position: relative;
 }

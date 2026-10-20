@@ -95,7 +95,7 @@ function Page() {
       </Dialog>
 
       <div className="max-w-[960px] overflow-x-auto rounded-[14px] bg-[#eeeeee] p-[2px]">
-        <table className="api-keys-table w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
+        <table className="dashboard-table api-keys-table w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
           <caption className="sr-only">API keys with their name, masked token, creation date, and enabled status.</caption>
           <thead>
             <tr className="text-sm text-neutral-500">

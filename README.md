@@ -49,6 +49,7 @@ in `.dev.vars`; restore port 3000 when using the frontend.
 bun run typegen    # Regenerate both Workers' types after changing bindings/config
 bun run build      # Build both apps and generate TanStack's route tree
 bun run typecheck
+bun run --filter @router/web test  # Puzzle generation and route validation
 bun run deploy     # Deploy the API first, then build and deploy the frontend
 ```
 
@@ -138,3 +139,14 @@ References: [Better Auth magic links](https://better-auth.com/docs/plugins/magic
 [email OTP](https://better-auth.com/docs/plugins/email-otp),
 [Drizzle adapter](https://better-auth.com/docs/adapters/drizzle), and
 [Resend email delivery](https://resend.com/docs/send-with-nodejs).
+
+## Missing pages
+
+Unmatched frontend URLs return HTTP 404 and show the route-the-packet game.
+Puzzles are generated in the browser after hydration, with no API calls or
+persisted game state. The generator creates a solvable path, adds decoy pipes,
+and scrambles tile rotations. Difficulty is an estimate based on path length,
+turns, and the rotations needed for the generated solution.
+
+Run `bun run --filter @router/web test` to check route generation, hints,
+difficulty coverage, and connectivity.

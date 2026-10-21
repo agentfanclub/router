@@ -3,11 +3,16 @@ import { Fragment, useRef, useState, type FormEvent } from "react";
 import { Button } from "../components/button";
 import { authClient } from "../lib/auth-client";
 import { getSession } from "../lib/session";
+import { signInReturn } from "../lib/sign-in-return";
 
 export const Route = createFileRoute("/login")({
-  validateSearch: (search: Record<string, unknown>): { error?: string } => ({ error: typeof search.error === "string" ? search.error : undefined }),
-  loader: async () => {
-    if (await getSession()) throw redirect({ to: "/" });
+  validateSearch: (search: Record<string, unknown>): { error?: string; returnTo?: string } => ({
+    error: typeof search.error === "string" ? search.error : undefined,
+    returnTo: signInReturn(search.returnTo),
+  }),
+  loaderDeps: ({ search }) => ({ returnTo: search.returnTo }),
+  loader: async ({ deps }) => {
+    if (await getSession()) throw redirect({ href: signInReturn(deps.returnTo) });
   },
   component: Login,
 });
@@ -15,6 +20,8 @@ export const Route = createFileRoute("/login")({
 function Login() {
   const router = useRouter();
   const search = Route.useSearch();
+  const callbackURL = signInReturn(search.returnTo);
+  const errorCallbackURL = `/login?${new URLSearchParams({ returnTo: callbackURL })}`;
   const [netid, setNetid] = useState("");
   const [sent, setSent] = useState(false);
   const [otp, setOtp] = useState<string[]>(Array(6).fill(""));
@@ -45,7 +52,7 @@ function Login() {
     setBusy(true);
     setError("");
     try {
-      const result = await authClient.signIn.magicLink({ email, callbackURL: "/", errorCallbackURL: "/login" });
+      const result = await authClient.signIn.magicLink({ email, callbackURL, errorCallbackURL });
       if (result.error) throw new Error(result.error.message || "Couldn't send your email.");
       setSent(true);
       setOtp(Array(6).fill(""));
@@ -62,8 +69,8 @@ function Login() {
     try {
       const result = await authClient.signIn.social({
         provider: "microsoft",
-        callbackURL: "/",
-        errorCallbackURL: "/login",
+        callbackURL,
+        errorCallbackURL,
       });
       if (result.error) throw new Error(result.error.message || "Couldn't start Illinois sign-in.");
     } catch (error) {
@@ -81,7 +88,7 @@ function Login() {
       const result = await authClient.signIn.emailOtp({ email, otp: otp.join("") });
       if (result.error) throw new Error(result.error.message || "Couldn't verify your code.");
       await router.invalidate();
-      await router.navigate({ to: "/" });
+      await router.navigate({ href: callbackURL });
     } catch (error) {
       setError(error instanceof Error ? error.message : "Couldn't verify your code. Try again.");
     } finally {

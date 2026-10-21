@@ -149,6 +149,8 @@ export function createAuth(env: ApiEnv) {
           // Email scanners can open links. Redeem the token only after a button click.
           const confirmationURL = new URL("/login/verify", url);
           confirmationURL.searchParams.set("token", token);
+          const callbackURL = new URL(url).searchParams.get("callbackURL");
+          if (callbackURL) confirmationURL.searchParams.set("returnTo", callbackURL);
           await sendEmail(email, "Sign in to Router", `Click this link to sign in:\n\n${confirmationURL}\n\nOr enter this code on the sign-in page: ${otp}\n\nBoth expire in 5 minutes. If you didn't request this email, ignore it.`);
         },
       }),

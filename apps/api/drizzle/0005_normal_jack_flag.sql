@@ -1,0 +1,1 @@
+ALTER TABLE `device_authorization` ADD `client` text DEFAULT 'opencode' NOT NULL;

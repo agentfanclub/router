@@ -3,11 +3,13 @@ import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { createAuth } from "./auth";
 import { apiKeyRoutes } from "./routes/api-keys";
+import { deviceAuthRoutes } from "./routes/device-auth";
 import { adminRoutes } from "./routes/admin";
 import { WorkerEnv } from "./worker-env";
 
 const routes = Layer.mergeAll(
   apiKeyRoutes,
+  deviceAuthRoutes,
   adminRoutes,
   HttpRouter.add("*", "/health", HttpServerResponse.text("OK")),
   HttpRouter.add("*", "/api/auth/*", (request) =>

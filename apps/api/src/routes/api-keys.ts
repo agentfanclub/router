@@ -1,19 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { apiKey } from "../db/schema";
+import { createApiKey, publicApiKeyFields } from "../util/keys";
 import { WorkerEnv } from "../worker-env";
 import { UserSession, userAuth } from "../middleware/user-auth";
-
-const publicFields = {
-  id: apiKey.id,
-  name: apiKey.name,
-  lastFive: apiKey.lastFive,
-  enabled: apiKey.enabled,
-  createdAt: apiKey.createdAt,
-};
 
 export type ApiKey = Pick<typeof apiKey.$inferSelect, "id" | "name" | "lastFive" | "enabled"> & {
   createdAt: string;
@@ -25,7 +17,7 @@ export const apiKeyRoutes = Layer.mergeAll(
     const session = yield* UserSession;
     const db = drizzle(env.DB);
     const keys = yield* Effect.promise(() => db
-      .select(publicFields)
+      .select(publicApiKeyFields)
       .from(apiKey)
       .where(eq(apiKey.userId, session.user.id))
       .orderBy(desc(apiKey.createdAt)),
@@ -56,20 +48,11 @@ export const apiKeyRoutes = Layer.mergeAll(
       );
     }
 
-    const token = `sk-afcrouter-${randomBytes(32).toString("hex")}`;
-    const hash = createHash("sha256").update(token).digest("hex");
-    const db = drizzle(env.DB);
-    const [key] = yield* Effect.promise(() => db
-      .insert(apiKey)
-      .values({
-        id: crypto.randomUUID(),
-        userId: session.user.id,
-        name,
-        hash,
-        lastFive: token.slice(-5),
-      })
-      .returning(publicFields),
-    );
+    const { key, token } = yield* Effect.promise(() => createApiKey({
+      db: drizzle(env.DB),
+      userId: session.user.id,
+      name,
+    }));
     return HttpServerResponse.jsonUnsafe({ key, token }, { status: 201 });
   })),
 
@@ -95,7 +78,7 @@ export const apiKeyRoutes = Layer.mergeAll(
       .update(apiKey)
       .set({ enabled })
       .where(and(eq(apiKey.id, id!), eq(apiKey.userId, session.user.id)))
-      .returning(publicFields),
+      .returning(publicApiKeyFields),
     );
 
     if (!key) {

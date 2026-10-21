@@ -29,6 +29,20 @@
       "when": 1792470773802,
       "tag": "0003_sudden_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792477570910,
+      "tag": "0004_loving_logan",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792479170162,
+      "tag": "0005_normal_jack_flag",
+      "breakpoints": true
     }
   ]
 }

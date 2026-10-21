@@ -156,6 +156,27 @@ References: [Better Auth magic links](https://better-auth.com/docs/plugins/magic
 [Drizzle adapter](https://better-auth.com/docs/adapters/drizzle), and
 [Resend email delivery](https://resend.com/docs/send-with-nodejs).
 
+## Device authorization
+
+`POST /api/device/code` accepts a JSON `client` of `opencode`, `pi`, or `oh-my-pi`.
+It starts a 10-minute request and returns a device secret, verification URL,
+comparison code, expiry, and a 5-second polling interval. The client polls
+`POST /api/device/token` with its device secret while the user signs in and
+approves or declines at `/connect/:client?code=...`.
+
+`GET /api/device/authorization/:code` reads a request for a signed-in user.
+`POST /api/device/authorization/:code` accepts an approval or denial from the
+website. The next successful token poll creates a dedicated API key and
+consumes the approval atomically. Users can revoke the key from API Keys.
+
+Apply the device authorization migrations before using the flow:
+
+```sh
+bun run --filter @router/api db:migrate:local
+# Before deploying the API:
+# bun run --filter @router/api db:migrate:remote
+```
+
 ## Missing pages
 
 Unmatched frontend URLs return HTTP 404 and show the route-the-packet game.

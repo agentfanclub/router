@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import type { DeviceClient } from "../device-clients";
 
 export const userRoles = ["admin", "user"] as const;
 
@@ -27,6 +28,16 @@ export const apiKey = sqliteTable("api_key", {
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   ...timestamps,
 }, (table) => [index("api_key_user_id_idx").on(table.userId)]);
+
+export const deviceAuthorization = sqliteTable("device_authorization", {
+  deviceCodeHash: text("device_code_hash").primaryKey(),
+  userCode: text("user_code").notNull().unique(),
+  client: text("client").$type<DeviceClient>().notNull().default("opencode"),
+  status: text("status", { enum: ["pending", "approved", "denied"] }).notNull().default("pending"),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  nextPollAt: integer("next_poll_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [index("device_authorization_expires_at_idx").on(table.expiresAt)]);
 
 export const session = sqliteTable("session", {
   id: text("id").primaryKey(),

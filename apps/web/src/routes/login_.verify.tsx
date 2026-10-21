@@ -1,23 +1,26 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/button";
+import { signInReturn } from "../lib/sign-in-return";
 
 export const Route = createFileRoute("/login_/verify")({
-  validateSearch: (search: Record<string, unknown>): { token?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { token?: string; returnTo?: string } => ({
     token: typeof search.token === "string" ? search.token : undefined,
+    returnTo: signInReturn(search.returnTo),
   }),
   head: () => ({ meta: [{ name: "referrer", content: "no-referrer" }] }),
   component: VerifyLink,
 });
 
 function VerifyLink() {
-  const { token } = Route.useSearch();
+  const { token, returnTo } = Route.useSearch();
   const [busy, setBusy] = useState(false);
 
   function signIn() {
     if (!token) return;
     setBusy(true);
-    const query = new URLSearchParams({ token, callbackURL: "/", errorCallbackURL: "/login" });
+    const callbackURL = signInReturn(returnTo);
+    const query = new URLSearchParams({ token, callbackURL, errorCallbackURL: `/login?${new URLSearchParams({ returnTo: callbackURL })}` });
     window.location.replace(`/api/auth/magic-link/verify?${query}`);
   }
 

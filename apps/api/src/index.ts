@@ -4,12 +4,14 @@ import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "e
 import { createAuth } from "./auth";
 import { apiKeyRoutes } from "./routes/api-keys";
 import { deviceAuthRoutes } from "./routes/device-auth";
+import { modelRoutes } from "./routes/models";
 import { adminRoutes } from "./routes/admin";
 import { WorkerEnv } from "./worker-env";
 
 const routes = Layer.mergeAll(
   apiKeyRoutes,
   deviceAuthRoutes,
+  modelRoutes,
   adminRoutes,
   HttpRouter.add("*", "/health", HttpServerResponse.text("OK")),
   HttpRouter.add("*", "/api/auth/*", (request) =>

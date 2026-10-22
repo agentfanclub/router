@@ -156,26 +156,63 @@ References: [Better Auth magic links](https://better-auth.com/docs/plugins/magic
 [Drizzle adapter](https://better-auth.com/docs/adapters/drizzle), and
 [Resend email delivery](https://resend.com/docs/send-with-nodejs).
 
-## Device authorization
+## Inference forwarding
 
-`POST /api/device/code` accepts a JSON `client` of `opencode`, `pi`, or `oh-my-pi`.
-It starts a 10-minute request and returns a device secret, verification URL,
-comparison code, expiry, and a 5-second polling interval. The client polls
-`POST /api/device/token` with its device secret while the user signs in and
-approves or declines at `/connect/:client?code=...`.
+The API exposes `POST /inference/v1/chat/completions`, forwarding
+to [Lumen](https://lumen.ncsa.illinois.edu/help/api). Set `LUMEN_API_KEY` in
+`apps/api/.dev.vars` locally. For production, set the API Worker's secret:
 
-`GET /api/device/authorization/:code` reads a request for a signed-in user.
-`POST /api/device/authorization/:code` accepts an approval or denial from the
-website. The next successful token poll creates a dedicated API key and
-consumes the approval atomically. Users can revoke the key from API Keys.
+```sh
+cd apps/api
+bunx --no-install wrangler secret put LUMEN_API_KEY
+```
 
-Apply the device authorization migrations before using the flow:
+Configure OpenAI-compatible clients with the base URL
+`https://api.router.agentfan.club/inference/v1`, or `http://localhost:8787/inference/v1` when running
+the standalone API locally. Use an enabled key created in the router's API Keys
+page as the client API key. Missing, invalid, deleted, and disabled keys return
+401. The router checks the key on every request and sends its own Lumen key
+upstream. Request bodies, query parameters, upstream status codes, and response
+bodies pass through, including streaming responses. Model IDs must match Lumen.
+`GET /api/models` serves the local catalog in `apps/api/src/data/models.json`
+using the same bearer API key authentication. It does not contact Lumen or require
+`LUMEN_API_KEY`. The catalog is a map keyed by Lumen model ID, following the
+[models.dev format](https://models.dev/models.json) with names, limits, costs per
+million tokens, modalities, and capability flags. It includes DeepSeek V4 Flash,
+DeepSeek V4.1 Flash, GLM-5.3, and Qwen3.8 Flash. Update that JSON file to change
+the available model list.
+Legacy completions, audio, and other Lumen endpoints are not exposed.
+
+## Coding agent connections
+
+`packages/opencode` registers Agent Fan Club as an OpenCode v2 provider with the ID `agentfanclub`. Its browser
+sign-in method opens `/connect/opencode`, where a signed-in user compares the
+code with their terminal and approves or declines. Illinois sign-in, email links,
+and email codes return to the approval page.
+
+`packages/pi` provides the same `agentfanclub` provider for Pi and Oh My Pi.
+Both clients use `/login` and discover models through `/api/models`. See
+[Pi and Oh My Pi setup](packages/pi/README.md).
+
+Apply the new D1 migrations before using the device flow:
 
 ```sh
 bun run --filter @router/api db:migrate:local
-# Before deploying the API:
+# For a release, apply the remote migration before deploying the API:
 # bun run --filter @router/api db:migrate:remote
 ```
+
+`POST /api/device/code` accepts a JSON `client` of `opencode`, `pi`, or `oh-my-pi`.
+It starts a 10-minute request and returns a device secret,
+a verification URL, and a public code. The plugin polls `POST /api/device/token`
+every 5 seconds. Approval requires a website session and a same-origin request.
+The first successful exchange creates a dedicated key named for the client and consumes
+the request atomically. The browser never receives the API key. Expired device
+requests are removed when a new request starts.
+
+Users can revoke the key from API Keys. Disconnecting in OpenCode only removes
+its local credential. See [plugin setup](packages/opencode/README.md) for local
+configuration. This flow has not been deployed or included in a new npm release.
 
 ## Missing pages
 

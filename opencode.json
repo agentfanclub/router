@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    {
+      "package": "./packages/opencode",
+      "options": {
+        "apiUrl": "http://localhost:8787"
+      }
+    }
+  ]
+}

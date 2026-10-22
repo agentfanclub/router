@@ -12,7 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DashboardRouteImport } from './routes/_dashboard'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardIndexRouteImport } from './routes/_dashboard.index'
-import { Route as DashboardUsersRouteImport } from './routes/_dashboard.users'
+import { Route as DashboardAdminRouteImport } from './routes/_dashboard.admin'
 import { Route as DashboardApiKeysRouteImport } from './routes/_dashboard.api-keys'
 import { Route as DashboardConnectionsRouteImport } from './routes/_dashboard.connections'
 import { Route as DashboardLogsRouteImport } from './routes/_dashboard.logs'
@@ -35,9 +35,9 @@ const DashboardIndexRoute = DashboardIndexRouteImport.update({
   path: '/',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardUsersRoute = DashboardUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
+const DashboardAdminRoute = DashboardAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => DashboardRoute,
 } as any)
 const DashboardApiKeysRoute = DashboardApiKeysRouteImport.update({
@@ -79,7 +79,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof DashboardIndexRoute
   '/login': typeof LoginRoute
-  '/users': typeof DashboardUsersRoute
+  '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
   '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
@@ -90,7 +90,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
-  '/users': typeof DashboardUsersRoute
+  '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
   '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
@@ -104,7 +104,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_dashboard': typeof DashboardRouteWithChildren
   '/login': typeof LoginRoute
-  '/_dashboard/users': typeof DashboardUsersRoute
+  '/_dashboard/admin': typeof DashboardAdminRoute
   '/_dashboard/api-keys': typeof DashboardApiKeysRoute
   '/_dashboard/connections': typeof DashboardConnectionsRoute
   '/_dashboard/logs': typeof DashboardLogsRoute
@@ -119,7 +119,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
-    | '/users'
+    | '/admin'
     | '/api-keys'
     | '/connections'
     | '/logs'
@@ -130,7 +130,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
-    | '/users'
+    | '/admin'
     | '/api-keys'
     | '/connections'
     | '/logs'
@@ -143,7 +143,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_dashboard'
     | '/login'
-    | '/_dashboard/users'
+    | '/_dashboard/admin'
     | '/_dashboard/api-keys'
     | '/_dashboard/connections'
     | '/_dashboard/logs'
@@ -185,11 +185,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardIndexRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/_dashboard/users': {
-      id: '/_dashboard/users'
-      path: '/users'
-      fullPath: '/users'
-      preLoaderRoute: typeof DashboardUsersRouteImport
+    '/_dashboard/admin': {
+      id: '/_dashboard/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof DashboardAdminRouteImport
       parentRoute: typeof DashboardRoute
     }
     '/_dashboard/api-keys': {
@@ -245,7 +245,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface DashboardRouteChildren {
-  DashboardUsersRoute: typeof DashboardUsersRoute
+  DashboardAdminRoute: typeof DashboardAdminRoute
   DashboardApiKeysRoute: typeof DashboardApiKeysRoute
   DashboardConnectionsRoute: typeof DashboardConnectionsRoute
   DashboardLogsRoute: typeof DashboardLogsRoute
@@ -254,7 +254,7 @@ interface DashboardRouteChildren {
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
-  DashboardUsersRoute: DashboardUsersRoute,
+  DashboardAdminRoute: DashboardAdminRoute,
   DashboardApiKeysRoute: DashboardApiKeysRoute,
   DashboardConnectionsRoute: DashboardConnectionsRoute,
   DashboardLogsRoute: DashboardLogsRoute,

@@ -2,7 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { getSession } from "../lib/session";
 import { getLumenUsage, listUsers } from "../lib/admin";
 
-export const Route = createFileRoute("/_dashboard/users")({
+export const Route = createFileRoute("/_dashboard/admin")({
   beforeLoad: async () => {
     const session = await getSession();
     if (!session) throw redirect({ to: "/login" });
@@ -33,7 +33,7 @@ function Page() {
     ["Coins spent", lumenUsage.cost.toLocaleString("en-US", { maximumFractionDigits: 8 })],
     ["Coins available", lumenUsage.coins_available === -2 ? "Unlimited"
       : lumenUsage.coins_available === null ? "No pool or blocked"
-      : lumenUsage.coins_available.toLocaleString("en-US", { maximumFractionDigits: 8 })],
+        : lumenUsage.coins_available.toLocaleString("en-US", { maximumFractionDigits: 8 })],
     ["Last used", lumenUsage.last_used_at === null ? "Never"
       : new Intl.DateTimeFormat("en-US", {
         dateStyle: "medium", timeStyle: "short", timeZone: "UTC",
@@ -42,7 +42,28 @@ function Page() {
 
   return (
     <section className="mx-auto w-full max-w-[1008px] px-6 pb-6 pt-10 max-[480px]:px-4">
-      <h1 className="mb-6 text-lg font-medium">Admin</h1>
+
+      <h1 className="mb-4 text-lg font-medium">Admin Panel</h1>
+
+      <section className="mt-10 mb-6" aria-labelledby="lumen-usage-heading">
+        <h2 id="lumen-usage-heading" className="text-base font-medium">Lumen usage</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Cumulative usage across all users sharing the router's Lumen API key. The available coin balance is shared across the Lumen account.
+        </p>
+        {usageFields ? (
+          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 bg-neutral-200 sm:grid-cols-4">
+            {usageFields.map(([label, value]) => (
+              <div key={label} className="bg-white p-4">
+                <dt className="text-xs text-neutral-500">{label}</dt>
+                <dd className="mt-2 break-words text-sm font-medium tabular-nums text-neutral-800">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p role="alert" className="mt-4 text-sm text-red-700">{lumenResult.error} Reload the page to try again.</p>
+        )}
+      </section>
+
       <h2 className="mb-4 text-base font-medium">Users</h2>
       <div className="dashboard-table-frame overflow-x-auto bg-[#eeeeee]">
         <table className="dashboard-table users-table w-full min-w-[540px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
@@ -72,24 +93,6 @@ function Page() {
           </tbody>
         </table>
       </div>
-      <section className="mt-10" aria-labelledby="lumen-usage-heading">
-        <h2 id="lumen-usage-heading" className="text-base font-medium">Lumen usage</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          Cumulative usage across all users sharing the router's Lumen API key. The available coin balance is shared across the Lumen account.
-        </p>
-        {usageFields ? (
-          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 bg-neutral-200 sm:grid-cols-4">
-            {usageFields.map(([label, value]) => (
-              <div key={label} className="bg-white p-4">
-                <dt className="text-xs text-neutral-500">{label}</dt>
-                <dd className="mt-2 break-words text-sm font-medium tabular-nums text-neutral-800">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <p role="alert" className="mt-4 text-sm text-red-700">{lumenResult.error} Reload the page to try again.</p>
-        )}
-      </section>
     </section>
   );
 }

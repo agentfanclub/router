@@ -8,7 +8,7 @@ type Session = Auth["$Infer"]["Session"];
 
 export class UserSession extends Context.Service<UserSession, Session>()("router/UserSession") { }
 
-export const userAuth = HttpRouter.middleware<{ provides: UserSession }>()(
+export const userAuthMiddleware = HttpRouter.middleware<{ provides: UserSession }>()(
   Effect.gen(function* () {
     const env = yield* WorkerEnv;
     const auth = createAuth(env);
@@ -31,4 +31,6 @@ export const userAuth = HttpRouter.middleware<{ provides: UserSession }>()(
       Effect.map(HttpServerResponse.setHeader("Cache-Control", "no-store")),
     );
   }),
-).layer;
+);
+
+export const userAuth = userAuthMiddleware.layer;

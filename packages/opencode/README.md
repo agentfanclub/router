@@ -17,8 +17,15 @@ If the connection is interrupted after approval, revoke the unused key and retry
 
 The implementation is in `src/index.ts`; the root `index.ts` lets OpenCode load
 the local package directory. OpenCode loads TypeScript directly, so no build
-step is needed. This implementation is local; the published `0.0.1` package is
-still the empty starter until a new version is released.
+step is needed.
+
+To load the npm package, add it to your OpenCode config:
+
+```json
+{
+  "plugins": ["@agentfanclub/opencode@0.1.0"]
+}
+```
 
 From the repository root:
 

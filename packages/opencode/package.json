@@ -1,6 +1,6 @@
 {
   "name": "@agentfanclub/opencode",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Agent Fan Club plugin for OpenCode v2",
   "type": "module",
   "exports": {

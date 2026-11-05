@@ -24,5 +24,21 @@
       "database_id": "138dd66b-9f20-4040-b9be-aff881f951dd",
       "migrations_dir": "drizzle"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_USAGE",
+        "class_name": "UserUsage"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "UserUsage"
+      ]
+    }
   ]
 }

@@ -136,7 +136,13 @@ bunx --no-install wrangler secret put RESEND_API_KEY
 bunx --no-install wrangler secret put MICROSOFT_CLIENT_ID
 bunx --no-install wrangler secret put MICROSOFT_TENANT_ID
 bunx --no-install wrangler secret put MICROSOFT_CLIENT_SECRET
+bunx --no-install wrangler secret put BYOK_ENCRYPTION_KEY
 ```
+
+`BYOK_ENCRYPTION_KEY` is any random string of at least 32 characters; it
+encrypts users' personal Lumen keys (AES-GCM) before they are stored. Without
+it, users cannot add personal keys, and inference works as before. Rotating it
+invalidates every stored personal key.
 
 Set `RESEND_FROM_EMAIL` in `apps/api/wrangler.jsonc` to a verified Resend sender.
 Production `BETTER_AUTH_URL` is `https://router.agentfan.club`, the public frontend
@@ -171,17 +177,120 @@ Configure OpenAI-compatible clients with the base URL
 `https://api.router.agentfan.club/inference/v1`, or `http://localhost:8787/inference/v1` when running
 the standalone API locally. Use an enabled key created in the router's API Keys
 page as the client API key. Missing, invalid, deleted, and disabled keys return
-401. The router checks the key on every request and sends its own Lumen key
-upstream. Request bodies, query parameters, upstream status codes, and response
-bodies pass through, including streaming responses. Model IDs must match Lumen.
-`GET /api/models` serves the local catalog in `apps/api/src/data/models.json`
-using the same bearer API key authentication. It does not contact Lumen or require
-`LUMEN_API_KEY`. The catalog is a map keyed by Lumen model ID, following the
-[models.dev format](https://models.dev/models.json) with names, limits, costs per
-million tokens, modalities, and capability flags. It includes DeepSeek V4 Flash,
-DeepSeek V4.1 Flash, GLM-5.3, and Qwen3.8 Flash. Update that JSON file to change
-the available model list.
-Legacy completions, audio, and other Lumen endpoints are not exposed.
+401. The router checks the key on every request, resolves the user and their
+usage limits, and sends its own Lumen key upstream. Model IDs must be in the
+local catalog in `apps/api/src/data/models.json`; unknown models return 404
+with the available list. `GET /api/models` serves the catalog using the same
+bearer API key authentication (or a website session). It does not contact
+Lumen or require `LUMEN_API_KEY`. The catalog is a map keyed by Lumen model ID,
+following the [models.dev format](https://models.dev/models.json) with names,
+limits, costs per million tokens, modalities, and capability flags. Update
+that JSON file to change the available model list.
+
+Request bodies are read and parsed by the worker so requests can be priced and
+session-tagged before forwarding. The router derives a stable session ID by
+prefixing `ses_` to a hash of the system prompt and first user message, independent of client session
+headers. Identical initial prompts share a tag; these tags are grouping hints,
+not unique conversation identifiers. The assigned tag is exposed on
+responses as `x-router-session`. On streaming requests where the client did
+not ask for usage, the router injects `stream_options.include_usage` upstream
+and strips the extra usage-only chunk from the client's stream; real token
+counts back the cost accounting. Legacy completions, audio, and other Lumen
+endpoints are not exposed.
+
+## Usage limits and logging
+
+Each user's inference spend is capped by two tumbling cost windows: **$10 per
+five hours and $50 per week** by default, anchored at the first request after
+the previous window expires, the same shape as subscription plans. Costs are
+integer micro-dollars computed from the model catalog's per-million-token
+prices, with cached input tokens priced at the cache-read rate.
+
+Enforcement lives in one `UserUsage` Durable Object per user (the `USER_USAGE`
+binding), which owns these records in its SQLite storage:
+
+- **Windows** — `(start, used)` counters per window. Windows advance only on
+  traffic: the first admission after a window expires re-anchors it to that
+  request, so an idle user keeps a spent budget until they return. The alarm
+  never resets windows, and reading usage never starts one — an expired window
+  is reported as empty and "resetting now" until the next admission consumes
+  the reset.
+- **Reservations** — admitted requests reserve an estimated cost (input
+  estimate from body size plus `max_tokens` at the model's output price) for
+  15 minutes. Concurrent requests, such as parallel coding-agent calls, cannot
+  jointly reserve more than a window allows. Expired reservations are released
+  and recorded as aborted with unknown usage and zero spend. Late reported usage is charged in the original
+  windows, without charging a new window after a reset.
+- **Request journal** — metadata is saved at admission, so pending and interrupted
+  requests remain visible. Settlement updates the journal and allowance counters
+  in one SQLite transaction. D1 receives an idempotent copy; failed writes stay
+  queued for an alarm retry. On upgrade, historical charges with estimated costs
+  and no token usage are cleared in both the journal and D1, and allowance
+  counters are rebuilt. Reservations without request metadata are released.
+- **Session routes** — the last upstream per session tag, keeping prompt-cache
+  affinity when more upstreams are added.
+
+The worker calls the object twice per request: `admit` before forwarding
+(returns the route and reservation, or a denial with reset timing) and
+`settle` after the response completes. Only reported token usage is charged;
+responses without usage record zero spend. The `estimated` flag marks unknown
+usage on non-error responses, including interrupted streams. Stream terminal events
+settle before being forwarded, and the stream pump and settlement use
+`waitUntil` so client disconnects do not discard accounting. Settle is idempotent
+per request ID. If the object is unreachable,
+requests fail closed with 503 rather than bypassing limits. When a cap is
+hit, clients receive a 429 `rate_limit_error` with a human-readable message,
+a `Retry-After` header, and both windows in the body.
+
+Every request — served, denied, failed, or aborted — is recorded in the
+`usage_log` D1 table with the user, API key, session tag, model, token counts,
+cost, status, and duration. Rows are keyed by request ID, so retried inserts
+cannot double-log. Prompt and completion bodies are never stored. The Logs
+page groups requests into one row per session, with model filters; the
+Overview page shows live window meters, in-flight reservations, and daily
+spend; the Admin page adds per-user and per-model spend with daily charts.
+
+Per-user limit overrides live in the `usage_limit` table
+(`PUT /api/admin/users/:id/limits`, editable in the Admin page); null columns
+fall back to the defaults. Apply the D1 migration before deploying:
+
+```sh
+bun run --filter @router/api db:migrate:local
+# For a release, apply the remote migration before deploying the API:
+# bun run --filter @router/api db:migrate:remote
+```
+
+The Durable Object class is SQLite-backed (`new_sqlite_classes` migration in
+`apps/api/wrangler.jsonc`); Wrangler applies the class migration on the first
+deploy that includes it.
+
+## Personal Lumen keys
+
+Users can add their own Lumen API keys from the API Keys page. A personal
+key is a fallback upstream with the lowest routing priority: the coordinator
+sends a request to it only when the club's shared allowance cannot serve —
+the five-hour or weekly cap is exhausted, or the shared Lumen account answers
+with an auth, payment, or quota error (401/402/429), in which case the router
+retries the request on the personal key immediately and the client never sees
+the first failure. Spend on a personal key is not capped by the club; it is
+logged and shown separately as personal spend on the Overview sparkline, the
+Logs page, and the Admin per-user table.
+
+Keys are verified against Lumen before they are stored, encrypted with
+AES-GCM under the `BYOK_ENCRYPTION_KEY` secret, and only decrypted when a
+request is actually routed to them. D1 stores ciphertext only. When Lumen
+rejects a personal key during a request (401/403), the router marks it
+invalid and later requests move on to the user's next active key or back to
+the shared account. A mid-request failover releases the club reservation
+without charging the allowance. Managing keys requires a website session;
+the endpoints are `GET/POST /api/byok/keys` and `DELETE /api/byok/keys/:id`.
+
+Later additions are designed for but not yet built: the club's OpenCode Go
+allocation as a second club upstream when the shared Lumen balance runs dry,
+and a shared club-state observation row so the coordinator can prefer healthy
+upstreams before the first failure. The admit/settle interface already
+accepts upstream availability and per-route prices, so these arrive as new
+inputs rather than protocol changes.
 
 ## Coding agent connections
 

@@ -65,6 +65,59 @@ export const account = sqliteTable("account", {
   ...timestamps,
 }, (table) => [index("account_user_id_idx").on(table.userId)]);
 
+// One completed, denied, or failed inference request. The request ID is the
+// primary key so worker retries after a transient D1 error cannot double-log.
+// Costs are integer micro-dollars. Prompt and completion bodies are never stored.
+export const usageUpstreams = ["club-lumen", "byok", "opencode-go"] as const;
+export const usageBilled = ["club", "personal"] as const;
+export const usageStatuses = ["pending", "ok", "error", "aborted", "denied"] as const;
+
+export const usageLog = sqliteTable("usage_log", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  // Plain text without a foreign key: keys can be deleted, history should not be.
+  apiKeyId: text("api_key_id"),
+  sessionId: text("session_id"),
+  model: text("model").notNull(),
+  upstream: text("upstream", { enum: usageUpstreams }).notNull(),
+  billed: text("billed", { enum: usageBilled }).notNull(),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cachedTokens: integer("cached_tokens"),
+  costMicro: integer("cost_micro").notNull(),
+  estimated: integer("estimated", { mode: "boolean" }).notNull().default(false),
+  status: text("status", { enum: usageStatuses }).notNull(),
+  durationMs: integer("duration_ms"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+}, (table) => [
+  index("usage_log_user_created_idx").on(table.userId, table.createdAt),
+  index("usage_log_session_idx").on(table.sessionId),
+  index("usage_log_created_idx").on(table.createdAt),
+]);
+
+// Per-user overrides of the default usage caps. Null columns fall back to the defaults.
+export const usageLimit = sqliteTable("usage_limit", {
+  userId: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  fiveHourMicro: integer("five_hour_micro"),
+  weeklyMicro: integer("weekly_micro"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()).$onUpdate(() => new Date()),
+});
+
+// A user's own Lumen API key. The key itself is AES-GCM encrypted under the
+// worker's BYOK_ENCRYPTION_KEY secret; only the ciphertext is stored. Active
+// keys are a fallback upstream when the club's shared allowance cannot serve.
+export const byokKeyStatuses = ["active", "invalid"] as const;
+
+export const byokKey = sqliteTable("byok_key", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  lastFive: text("last_five").notNull(),
+  status: text("status", { enum: byokKeyStatuses }).notNull().default("active"),
+  ...timestamps,
+}, (table) => [index("byok_key_user_idx").on(table.userId, table.status)]);
+
 // Stores expiring sign-in links and OTP hashes, not a separate verification flow.
 export const verification = sqliteTable("verification", {
   id: text("id").primaryKey(),

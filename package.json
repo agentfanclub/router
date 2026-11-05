@@ -20,7 +20,8 @@
     "deploy:api": "turbo run deploy --filter=@router/api",
     "deploy:web": "turbo run deploy --filter=@router/web",
     "typegen": "turbo run typegen",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "dev:clone-prod": "python3 scripts/clone-prod.py"
   },
   "devDependencies": {
     "turbo": "^2.11.9",

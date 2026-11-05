@@ -41,6 +41,20 @@ the local Workers runtime and connects the service binding. You do not need a
 second terminal. Vite and standalone Wrangler share the API's
 `apps/api/.wrangler/state` directory so both use the same local D1 database.
 
+To refresh localhost with production data, stop the dev server and run:
+
+```sh
+bun run dev:clone-prod
+bun run dev
+```
+
+This reads production D1 and replaces local D1, including users, auth sessions,
+API keys, and usage logs. Previous local state and a database snapshot are saved
+under `apps/api/.wrangler/snapshots/`, which is ignored by Git. Local usage
+counters rebuild from the copied logs. Production Durable Object state is not
+copied, so in-flight reservations are not included. Sign in on localhost normally;
+production browser cookies belong to the production domain.
+
 To run just the API, use `bun run dev:api` and visit http://localhost:8787/.
 For direct auth testing on that port, set `BETTER_AUTH_URL=http://localhost:8787`
 in `.dev.vars`; restore port 3000 when using the frontend.

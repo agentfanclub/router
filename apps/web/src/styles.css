@@ -39,7 +39,15 @@
 }
 
 .users-table tr {
-  grid-template-columns: minmax(140px, 1fr) minmax(240px, 2fr) 120px;
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr) 84px 130px 190px;
+}
+
+.logs-table tr {
+  grid-template-columns: 116px minmax(130px, 1.3fr) 146px minmax(160px, 1.5fr) 96px 82px 88px;
+}
+
+.models-usage-table tr {
+  grid-template-columns: minmax(200px, 1fr) 96px 120px 120px 110px;
 }
 
 .dashboard-table tbody {
@@ -68,4 +76,12 @@
 
 .dashboard-table tbody td {
   position: relative;
+}
+
+/* Shared UI colors for dialogs, dropdowns, and tabs. */
+@theme inline {
+  --color-muted-foreground: #737373;
+  --color-foreground: #262626;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #262626;
 }

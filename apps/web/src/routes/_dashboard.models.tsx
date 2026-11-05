@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Brain, Check, Copy, Image, Minus, Terminal, Type } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import { useEffect, useState } from "react";
+import { listModels } from "../lib/models";
 
 const features = {
   reasoning: { label: "Reasoning", icon: Brain },
@@ -10,25 +11,15 @@ const features = {
   text: { label: "Text", icon: Type },
 };
 
-// Sample catalog from the reference until a model API is connected.
-const models = [
-  { name: "Beam", id: "beam-free", features: ["reasoning", "tools", "text"], input: 0, output: 0, cacheRead: 0, cacheWrite: null },
-  { name: "Big Pickle", id: "big-pickle", features: ["reasoning", "tools", "text"], input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  { name: "Claude Fable 5", id: "claude-fable-5", features: ["reasoning", "vision"], input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
-  { name: "Claude Fable 5.1", id: "claude-fable-5-1", features: ["reasoning", "vision"], input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
-  { name: "Claude Haiku 4.5", id: "claude-haiku-4-5", features: ["reasoning", "vision"], input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  { name: "Claude Haiku 5.5", id: "claude-haiku-5-5", features: ["reasoning", "vision"], input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.13 },
-  { name: "Claude Opus 4.5", id: "claude-opus-4-5", features: ["reasoning", "vision"], input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  { name: "Claude Opus 4.6", id: "claude-opus-4-6", features: ["reasoning", "vision"], input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-] satisfies { name: string; id: string; features: (keyof typeof features)[]; input: number; output: number; cacheRead: number | null; cacheWrite: number | null }[];
-
 const priceFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 export const Route = createFileRoute("/_dashboard/models")({
+  loader: () => listModels(),
   component: Page,
 });
 
 function Page() {
+  const models = Route.useLoaderData();
   const [copyResult, setCopyResult] = useState<{ id: string; status: "copied" | "error" } | null>(null);
 
   useEffect(() => {
@@ -50,7 +41,7 @@ function Page() {
 
         <div className="dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]">
           <table className="dashboard-table models-table w-full min-w-[872px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
-            <caption className="sr-only">Sample models with their IDs, features, and prices in USD per million tokens.</caption>
+            <caption className="sr-only">Models with their IDs, features, and prices in USD per million tokens.</caption>
             <thead>
               <tr className="text-sm text-neutral-500">
                 <th scope="col" className="px-6 py-2.5 font-medium">Model</th>
@@ -66,7 +57,7 @@ function Page() {
                   <td className="min-w-0 px-6 py-3">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-neutral-800" title={model.name}>{model.name}</span>
-                      {model.input === 0 && model.output === 0 && (
+                      {model.cost.input === 0 && model.cost.output === 0 && (
                         <span className="rounded border border-neutral-200 bg-neutral-100 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">Free</span>
                       )}
                     </div>
@@ -98,7 +89,14 @@ function Page() {
                     )}
                   </td>
                   <td className="flex items-center gap-1 px-3 py-3">
-                    {model.features.map((feature) => {
+                    {(Object.keys(features) as (keyof typeof features)[]).filter((feature) => {
+                      switch (feature) {
+                        case "reasoning": return model.reasoning;
+                        case "vision": return model.modalities.input.includes("image");
+                        case "tools": return model.tool_call;
+                        case "text": return model.modalities.input.includes("text");
+                      }
+                    }).map((feature) => {
                       const { label, icon: Icon } = features[feature];
                       return (
                         <Tooltip.Root key={feature}>
@@ -117,13 +115,18 @@ function Page() {
                       );
                     })}
                   </td>
-                  {[model.input, model.output, model.cacheRead, model.cacheWrite].map((price, index) => (
+                  {[model.cost.input, model.cost.output, model.cost.cache_read, model.cost.cache_write].map((price, index) => (
                     <td key={index} className="px-4 py-3 text-right tabular-nums last:pr-6">
-                      {price === null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
+                      {price == null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
                     </td>
                   ))}
                 </tr>
               ))}
+              {models.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center text-neutral-500">No models available.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

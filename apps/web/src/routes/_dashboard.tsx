@@ -10,7 +10,7 @@ const dashboardTabs = [
   { to: "/logs", label: "Logs" },
   { to: "/models", label: "Models" },
   { to: "/api-keys", label: "API Keys" },
-  { to: "/connections", label: "Connections" },
+  { to: "/setup", label: "Setup" },
 ] as const;
 
 export const Route = createFileRoute("/_dashboard")({
@@ -75,17 +75,17 @@ function Dashboard() {
       <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-200 bg-neutral-50">
         <nav aria-label="Dashboard" className="flex shrink-0 gap-6 overflow-x-auto overflow-y-hidden border-b border-neutral-200 px-[22px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[480px]:gap-5 max-[480px]:px-4">
           {dashboardTabs.map((item) => (
-            <Link key={item.to} to={item.to} activeOptions={{ exact: true }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800 ">
+            <Link key={item.to} to={item.to} activeOptions={{ exact: true, includeSearch: false }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800 ">
               {item.label}
             </Link>
           ))}
           {user.role === "admin" && (
-            <Link to="/admin" activeOptions={{ exact: true }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
+            <Link to="/admin" activeOptions={{ exact: true, includeSearch: false }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
               Admin
             </Link>
           )}
         </nav>
-        <main id="dashboard-content" className="min-h-0 flex-1 overflow-y-auto bg-white">
+        <main id="dashboard-content" className="relative min-h-0 flex-1 overflow-y-auto bg-white">
           <Outlet />
         </main>
       </div>

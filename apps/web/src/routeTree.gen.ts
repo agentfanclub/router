@@ -14,9 +14,9 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardIndexRouteImport } from './routes/_dashboard.index'
 import { Route as DashboardAdminRouteImport } from './routes/_dashboard.admin'
 import { Route as DashboardApiKeysRouteImport } from './routes/_dashboard.api-keys'
-import { Route as DashboardConnectionsRouteImport } from './routes/_dashboard.connections'
 import { Route as DashboardLogsRouteImport } from './routes/_dashboard.logs'
 import { Route as DashboardModelsRouteImport } from './routes/_dashboard.models'
+import { Route as DashboardSetupRouteImport } from './routes/_dashboard.setup'
 import { Route as ConnectClientRouteImport } from './routes/connect.$client'
 import { Route as LoginVerifyRouteImport } from './routes/login_.verify'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -45,11 +45,6 @@ const DashboardApiKeysRoute = DashboardApiKeysRouteImport.update({
   path: '/api-keys',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardConnectionsRoute = DashboardConnectionsRouteImport.update({
-  id: '/connections',
-  path: '/connections',
-  getParentRoute: () => DashboardRoute,
-} as any)
 const DashboardLogsRoute = DashboardLogsRouteImport.update({
   id: '/logs',
   path: '/logs',
@@ -58,6 +53,11 @@ const DashboardLogsRoute = DashboardLogsRouteImport.update({
 const DashboardModelsRoute = DashboardModelsRouteImport.update({
   id: '/models',
   path: '/models',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardSetupRoute = DashboardSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => DashboardRoute,
 } as any)
 const ConnectClientRoute = ConnectClientRouteImport.update({
@@ -81,9 +81,9 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
-  '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
+  '/setup': typeof DashboardSetupRoute
   '/connect/$client': typeof ConnectClientRoute
   '/login/verify': typeof LoginVerifyRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -92,9 +92,9 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
-  '/connections': typeof DashboardConnectionsRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
+  '/setup': typeof DashboardSetupRoute
   '/connect/$client': typeof ConnectClientRoute
   '/login/verify': typeof LoginVerifyRoute
   '/': typeof DashboardIndexRoute
@@ -106,9 +106,9 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_dashboard/admin': typeof DashboardAdminRoute
   '/_dashboard/api-keys': typeof DashboardApiKeysRoute
-  '/_dashboard/connections': typeof DashboardConnectionsRoute
   '/_dashboard/logs': typeof DashboardLogsRoute
   '/_dashboard/models': typeof DashboardModelsRoute
+  '/_dashboard/setup': typeof DashboardSetupRoute
   '/connect/$client': typeof ConnectClientRoute
   '/login_/verify': typeof LoginVerifyRoute
   '/_dashboard/': typeof DashboardIndexRoute
@@ -121,9 +121,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin'
     | '/api-keys'
-    | '/connections'
     | '/logs'
     | '/models'
+    | '/setup'
     | '/connect/$client'
     | '/login/verify'
     | '/api/auth/$'
@@ -132,9 +132,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin'
     | '/api-keys'
-    | '/connections'
     | '/logs'
     | '/models'
+    | '/setup'
     | '/connect/$client'
     | '/login/verify'
     | '/'
@@ -145,9 +145,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/_dashboard/admin'
     | '/_dashboard/api-keys'
-    | '/_dashboard/connections'
     | '/_dashboard/logs'
     | '/_dashboard/models'
+    | '/_dashboard/setup'
     | '/connect/$client'
     | '/login_/verify'
     | '/_dashboard/'
@@ -199,13 +199,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardApiKeysRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/_dashboard/connections': {
-      id: '/_dashboard/connections'
-      path: '/connections'
-      fullPath: '/connections'
-      preLoaderRoute: typeof DashboardConnectionsRouteImport
-      parentRoute: typeof DashboardRoute
-    }
     '/_dashboard/logs': {
       id: '/_dashboard/logs'
       path: '/logs'
@@ -218,6 +211,13 @@ declare module '@tanstack/react-router' {
       path: '/models'
       fullPath: '/models'
       preLoaderRoute: typeof DashboardModelsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/_dashboard/setup': {
+      id: '/_dashboard/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof DashboardSetupRouteImport
       parentRoute: typeof DashboardRoute
     }
     '/connect/$client': {
@@ -247,18 +247,18 @@ declare module '@tanstack/react-router' {
 interface DashboardRouteChildren {
   DashboardAdminRoute: typeof DashboardAdminRoute
   DashboardApiKeysRoute: typeof DashboardApiKeysRoute
-  DashboardConnectionsRoute: typeof DashboardConnectionsRoute
   DashboardLogsRoute: typeof DashboardLogsRoute
   DashboardModelsRoute: typeof DashboardModelsRoute
+  DashboardSetupRoute: typeof DashboardSetupRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardAdminRoute: DashboardAdminRoute,
   DashboardApiKeysRoute: DashboardApiKeysRoute,
-  DashboardConnectionsRoute: DashboardConnectionsRoute,
   DashboardLogsRoute: DashboardLogsRoute,
   DashboardModelsRoute: DashboardModelsRoute,
+  DashboardSetupRoute: DashboardSetupRoute,
   DashboardIndexRoute: DashboardIndexRoute,
 }
 

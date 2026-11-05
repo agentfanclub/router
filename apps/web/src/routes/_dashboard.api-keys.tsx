@@ -3,22 +3,33 @@ import { Check, Copy, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from "../lib/api-keys";
 import { Button } from "../components/button";
+import { PersonalLumenKeys } from "../components/personal-lumen-keys";
+import { listByokKeys } from "../lib/byok";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
-  timeZone: "UTC",
 });
 
 export const Route = createFileRoute("/_dashboard/api-keys")({
-  loader: () => listApiKeys(),
+  loader: async () => {
+    const [keys, personalKeys] = await Promise.all([
+      listApiKeys(),
+      listByokKeys().then(
+        (keys) => ({ keys, error: null }),
+        (error: unknown) => ({ keys: null, error: error instanceof Error ? error.message : "Couldn't load personal Lumen keys." }),
+      ),
+    ]);
+    return { keys, personalKeys };
+  },
   component: Page,
 });
 
 function Page() {
-  const [keys, setKeys] = useState<Awaited<ReturnType<typeof listApiKeys>>>(Route.useLoaderData());
+  const initial = Route.useLoaderData();
+  const [keys, setKeys] = useState(initial.keys);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
@@ -231,6 +242,7 @@ function Page() {
           </tbody>
         </table>
       </div>
+      <PersonalLumenKeys initialKeys={initial.personalKeys.keys} loadError={initial.personalKeys.error} />
     </section>
   );
 }

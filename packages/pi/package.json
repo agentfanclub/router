@@ -1,6 +1,6 @@
 {
   "name": "@agentfanclub/pi",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Agent Fan Club provider and browser sign-in for Pi and Oh My Pi",
   "type": "module",
   "keywords": [

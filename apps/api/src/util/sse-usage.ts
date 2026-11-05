@@ -3,9 +3,10 @@ import { parseOpenAiUsage } from "./usage";
 
 // Capture terminal events before forwarding them. Clients can stop reading as
 // soon as they receive [DONE], without waiting for the HTTP body to close.
-export function usageCaptureTransform({ clientWantsUsage, onFinish }: {
+export function usageCaptureTransform({ clientWantsUsage, onFinish, onError }: {
   clientWantsUsage: boolean;
   onFinish: (status: "ok" | "error" | "aborted", usage: ParsedUsage | null) => Promise<void>;
+  onError: (error: unknown) => void;
 }): { transform: TransformStream<Uint8Array, Uint8Array>; finish: (status: "ok" | "error" | "aborted") => Promise<void> } {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -44,6 +45,7 @@ export function usageCaptureTransform({ clientWantsUsage, onFinish }: {
     if (parsed.usage !== undefined) captured = parseOpenAiUsage(parsed.usage) ?? captured;
     if (parsed.error != null || errorEvent) {
       upstreamError = true;
+      onError(parsed.error);
       await finish("error");
     }
     if (!clientWantsUsage && Array.isArray(parsed.choices) && parsed.choices.length === 0 && parsed.usage !== undefined && parsed.error == null) {

@@ -264,6 +264,27 @@ The Durable Object class is SQLite-backed (`new_sqlite_classes` migration in
 `apps/api/wrangler.jsonc`); Wrangler applies the class migration on the first
 deploy that includes it.
 
+### Inference diagnostics
+
+Cloudflare Workers Logs and automatic traces are enabled at 100% sampling in
+`apps/api/wrangler.jsonc`. In the Cloudflare dashboard, open `router-api` →
+Observability to search stored events or inspect upstream fetch spans. Logs
+start when enabled; they do not recover past failures.
+
+Inference responses after admission include `x-router-request-id`, matching
+the D1 usage record ID and the structured logs' `requestId`. Filter by that
+field to follow `upstream_started`, `upstream_response`, and
+`inference_finished` events. Upstream responses record HTTP status, time to
+response headers (`headersMs`), attempt number, route, and upstream request/Ray
+IDs when available. Failovers log both attempts. Separate error events identify
+HTTP errors, fetch failures, JSON/SSE errors, interrupted streams, and settlement
+failures. An HTTP 200 can still contain a JSON or SSE error.
+
+Diagnostic events exclude prompts, completions, credentials, and raw error
+messages/bodies. Only short machine error codes/types are retained. Query
+strings are redacted from Cloudflare invocation logs and traces. These events
+live in Cloudflare, not D1; historical usage rows retain their existing fields.
+
 ## Personal Lumen keys
 
 Users can add their own Lumen API keys from the API Keys page. A personal

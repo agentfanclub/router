@@ -15,6 +15,7 @@ import {
   type RoutePrice,
 } from "../util/usage";
 import { usageCaptureTransform } from "../util/sse-usage";
+import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
 import { WorkerEnv, WorkerExecution } from "../worker-env";
 
 const LUMEN_CHAT_URL = "https://lumen.ncsa.illinois.edu/v1/chat/completions";
@@ -58,10 +59,10 @@ function modelPrice(entry: CatalogModel): RoutePrice {
   return { input: entry.cost.input, output: entry.cost.output, cacheRead: entry.cost.cache_read };
 }
 
-function chatError(message: string, code: string, status: 400 | 404 | 429 | 502 | 503) {
+function chatError(message: string, code: string, status: 400 | 404 | 429 | 502 | 503, requestId?: string) {
   return HttpServerResponse.jsonUnsafe({
     error: { message, type: status === 429 ? "rate_limit_error" : "server_error", code, param: null },
-  }, { status });
+  }, { status, headers: requestId ? { "x-router-request-id": requestId } : undefined });
 }
 
 const handleRequest = Effect.gen(function* () {
@@ -104,6 +105,7 @@ const handleRequest = Effect.gen(function* () {
   const inputEstimateTokens = Math.ceil(rawBody.length / 4);
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
+  const logContext = { requestId, model: body.model, stream: body.stream === true };
 
   const stub = env.USER_USAGE.get(env.USER_USAGE.idFromName(identity.userId));
   // A personal Lumen key is a fallback upstream: it can serve when the club
@@ -134,9 +136,10 @@ const handleRequest = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
   if (!admit || !admit.ok) {
+    console.error({ event: "inference_admission_error", ...logContext, coordinatorStatus: admit?.status ?? null });
     // Fail closed: if the usage coordinator is unreachable, serving anyway
     // would bypass every limit.
-    return chatError("Unable to check usage limits right now. Try again.", "usage_unavailable", 503);
+    return chatError("Unable to check usage limits right now. Try again.", "usage_unavailable", 503, requestId);
   }
   const decision: AdmitResult = yield* Effect.promise(() => admit.json<AdmitResult>());
 
@@ -147,8 +150,9 @@ const handleRequest = Effect.gen(function* () {
 
   const db = drizzle(env.DB);
   if (decision.decision === "deny") {
+    console.info({ event: "inference_denied", ...logContext, reason: decision.reason });
     if (decision.reason === "no_upstream") {
-      return chatError("No upstream is currently available to serve this request. Try again soon.", "no_upstream", 503);
+      return chatError("No upstream is currently available to serve this request. Try again soon.", "no_upstream", 503, requestId);
     }
     const window = decision.reason === "weekly_cap" ? decision.snapshot.weekly : decision.snapshot.fiveHour;
     const label = decision.reason === "weekly_cap" ? "Weekly" : "Five-hour";
@@ -162,13 +166,14 @@ const handleRequest = Effect.gen(function* () {
       usage: { fiveHour: publicWindow(decision.snapshot.fiveHour), weekly: publicWindow(decision.snapshot.weekly) },
     }, {
       status: 429,
-      headers: { "retry-after": String(Math.max(1, Math.ceil(window.resetsInMs / 1000))) },
+      headers: { "retry-after": String(Math.max(1, Math.ceil(window.resetsInMs / 1000))), "x-router-request-id": requestId },
     });
   }
 
   // Reservations bound in-flight usage. Only reported token usage becomes spend.
   // An interrupted response without usage has an unknown cost, recorded as zero.
   const finalize = async (args: { status: "ok" | "error" | "aborted"; usage: ParsedUsage | null; durationMs: number }) => {
+    console.info({ event: "inference_finished", ...logContext, route, status: args.status, durationMs: args.durationMs });
     const costMicro = args.usage !== null
       ? computeCostMicro(args.usage, price)
       : 0;
@@ -188,7 +193,10 @@ const handleRequest = Effect.gen(function* () {
     };
     // A terminal stream event can cause the client to close its connection.
     // Keep the settlement alive independently of that response's lifetime.
-    const pending = settlement().catch(() => settlement());
+    const pending = settlement().catch(() => settlement()).catch((error: unknown) => {
+      console.error({ event: "inference_settlement_error", ...logContext, route });
+      throw error;
+    });
     execution.waitUntil(pending);
     await pending;
   };
@@ -201,18 +209,43 @@ const handleRequest = Effect.gen(function* () {
     ? JSON.stringify({ ...JSON.parse(rawBody), stream_options: { include_usage: true } })
     : rawBody;
 
-  const sendUpstream = (credential: string) => fetch(LUMEN_CHAT_URL, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${credential}`,
-      "content-type": webRequest.headers.get("content-type") ?? "application/json",
-      accept: request.headers.accept ?? "application/json",
-      "x-opencode-session": sessionId,
-    },
-    body: upstreamBodyText,
-    signal: webRequest.signal,
-    redirect: "manual",
-  });
+  let attempt = 0;
+  const sendUpstream = async (credential: string, attemptRoute: UpstreamRoute) => {
+    const attemptNumber = ++attempt;
+    const attemptStartedAt = Date.now();
+    const attemptContext = { ...logContext, route: attemptRoute, attempt: attemptNumber };
+    console.info({ event: "upstream_started", ...attemptContext });
+    try {
+      const response = await fetch(LUMEN_CHAT_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": webRequest.headers.get("content-type") ?? "application/json",
+          accept: request.headers.accept ?? "application/json",
+          "x-opencode-session": sessionId,
+        },
+        body: upstreamBodyText,
+        signal: webRequest.signal,
+        redirect: "manual",
+      });
+      console.info({
+        event: "upstream_response", ...attemptContext,
+        upstreamStatus: response.status,
+        headersMs: Date.now() - attemptStartedAt,
+        upstreamRay: diagnosticIdentifier(response.headers.get("cf-ray")),
+        upstreamRequestId: diagnosticIdentifier(response.headers.get("x-request-id")),
+      });
+      return response;
+    } catch (error) {
+      console.error({
+        event: "upstream_fetch_error", ...attemptContext,
+        elapsedMs: Date.now() - attemptStartedAt,
+        clientAborted: webRequest.signal.aborted,
+        errorName: error instanceof Error ? diagnosticIdentifier(error.name) : null,
+      });
+      throw error;
+    }
+  };
 
   const personalCredential = () => identity.byok && env.BYOK_ENCRYPTION_KEY
     ? decryptSecret(identity.byok.ciphertext, env.BYOK_ENCRYPTION_KEY)
@@ -225,14 +258,14 @@ const handleRequest = Effect.gen(function* () {
     credential = yield* Effect.promise(personalCredential);
     if (!credential) {
       yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
-      return chatError("Unable to use your personal Lumen key. Re-add it from Connections.", "byok_unreadable", 502);
+      return chatError("Unable to use your personal Lumen key. Re-add it from Connections.", "byok_unreadable", 502, requestId);
     }
   } else if (!credential) {
     yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
-    return chatError("No upstream is currently available to serve this request.", "no_upstream", 503);
+    return chatError("No upstream is currently available to serve this request.", "no_upstream", 503, requestId);
   }
 
-  let upstream = yield* Effect.tryPromise(() => sendUpstream(credential!)).pipe(
+  let upstream = yield* Effect.tryPromise(() => sendUpstream(credential!, route)).pipe(
     Effect.orElseSucceed(() => null),
   );
 
@@ -240,9 +273,9 @@ const handleRequest = Effect.gen(function* () {
     const aborted = webRequest.signal.aborted;
     yield* Effect.promise(() => finalize({ status: aborted ? "aborted" : "error", usage: null, durationMs: Date.now() - startedAt }));
     if (aborted) {
-      return HttpServerResponse.fromWeb(new Response(null, { status: 499 }));
+      return HttpServerResponse.fromWeb(new Response(null, { status: 499, headers: { "x-router-request-id": requestId } }));
     }
-    return chatError("Unable to reach Lumen.", "upstream_unreachable", 502);
+    return chatError("Unable to reach Lumen.", "upstream_unreachable", 502, requestId);
   }
 
   // Seamless failover: the club account cannot serve (auth, payment, or
@@ -253,7 +286,7 @@ const handleRequest = Effect.gen(function* () {
     const secret = yield* Effect.promise(personalCredential);
     if (secret) {
       const first = upstream;
-      const retry = yield* Effect.tryPromise(() => sendUpstream(secret)).pipe(
+      const retry = yield* Effect.tryPromise(() => sendUpstream(secret, "byok")).pipe(
         Effect.orElseSucceed(() => null),
       );
       if (retry) {
@@ -277,10 +310,13 @@ const handleRequest = Effect.gen(function* () {
 
   if (!upstream.ok || !upstream.body) {
     const errorText = yield* Effect.promise(() => upstream.text().catch(() => ""));
+    let error: unknown;
+    try { error = (JSON.parse(errorText) as { error?: unknown } | null)?.error; } catch {}
+    console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
     yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
     return HttpServerResponse.fromWeb(new Response(errorText || null, {
       status: upstream.status,
-      headers: upstream.headers,
+      headers: responseHeaders(upstream.headers, sessionId, requestId),
     }));
   }
 
@@ -293,11 +329,15 @@ const handleRequest = Effect.gen(function* () {
       usage = null;
     }
     let hasError = false;
-    try { hasError = Boolean((JSON.parse(text) as { error?: unknown }).error); } catch {}
+    try {
+      const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+      hasError = Boolean(error);
+      if (hasError) console.error({ event: "upstream_body_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
+    } catch {}
     yield* Effect.promise(() => finalize({ status: hasError ? "error" : "ok", usage, durationMs: Date.now() - startedAt }));
     return HttpServerResponse.fromWeb(new Response(text, {
       status: upstream.status,
-      headers: responseHeaders(upstream.headers, sessionId),
+      headers: responseHeaders(upstream.headers, sessionId, requestId),
     }));
   });
 
@@ -305,33 +345,39 @@ const handleRequest = Effect.gen(function* () {
   if (!body.stream || !isEventStream) {
     const text = yield* Effect.tryPromise(() => upstream.text()).pipe(Effect.orElseSucceed(() => null));
     if (text === null) {
+      console.error({ event: "upstream_body_read_error", ...logContext, route, upstreamStatus: upstream.status, clientAborted: webRequest.signal.aborted });
       yield* Effect.promise(() => finalize({ status: webRequest.signal.aborted ? "aborted" : "error", usage: null, durationMs: Date.now() - startedAt }));
-      return chatError("Unable to read the upstream response.", "upstream_unreachable", 502);
+      return chatError("Unable to read the upstream response.", "upstream_unreachable", 502, requestId);
     }
     return yield* respondBuffered(text);
   }
 
   const capture = usageCaptureTransform({
     clientWantsUsage,
+    onError: (error) => console.error({ event: "upstream_stream_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) }),
     onFinish: (status, usage) => finalize({ status, usage, durationMs: Date.now() - startedAt }),
   });
   const output = new TransformStream<Uint8Array, Uint8Array>();
   // Observe the pump as well as normal stream completion. Errors and client
   // cancellation do not necessarily invoke a transformer's flush callback.
   const pump = upstream.body.pipeThrough(capture.transform).pipeTo(output.writable)
-    .catch(async () => { await capture.finish("aborted"); });
+    .catch(async (error: unknown) => {
+      console.error({ event: "upstream_stream_interrupted", ...logContext, route, upstreamStatus: upstream.status, clientAborted: webRequest.signal.aborted, errorName: error instanceof Error ? diagnosticIdentifier(error.name) : null });
+      await capture.finish("aborted");
+    });
   execution.waitUntil(pump);
   const piped = output.readable;
 
   return HttpServerResponse.fromWeb(new Response(piped, {
     status: upstream.status,
-    headers: responseHeaders(upstream.headers, sessionId),
+    headers: responseHeaders(upstream.headers, sessionId, requestId),
   }));
 });
 
-function responseHeaders(upstream: Headers, sessionId: string): Headers {
+function responseHeaders(upstream: Headers, sessionId: string, requestId: string): Headers {
   const headers = new Headers(upstream);
   headers.set("x-router-session", sessionId);
+  headers.set("x-router-request-id", requestId);
   return headers;
 }
 

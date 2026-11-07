@@ -34,10 +34,10 @@ interface DataTableProps {
 
 export function DataTable({ variant, caption, minWidth, children, className }: DataTableProps) {
   return (
-    <div className={cn("dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]", className)}>
+    <div className={cn("dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee] dark:bg-neutral-800", className)}>
       <table
         className={cn(
-          "dashboard-table w-full border-separate border-spacing-0 text-left text-sm text-neutral-600",
+          "dashboard-table w-full border-separate border-spacing-0 text-left text-sm text-neutral-600 dark:text-neutral-300",
           variantClass[variant],
         )}
         style={{ minWidth }}
@@ -52,7 +52,7 @@ export function DataTable({ variant, caption, minWidth, children, className }: D
 export function TableHead({ children }: { children: ReactNode }) {
   return (
     <thead>
-      <tr className="text-sm text-neutral-500">{children}</tr>
+      <tr className="text-sm text-neutral-500 dark:text-neutral-400">{children}</tr>
     </thead>
   );
 }
@@ -104,7 +104,7 @@ interface TableBodyProps<T> {
 
 export function TableBody<T>({ rows, rowKey, rowClassName, renderRow, columns, empty }: TableBodyProps<T>) {
   return (
-    <tbody className="bg-white" data-single-row={rows.length === 1 ? "true" : undefined}>
+    <tbody className="bg-white dark:bg-neutral-950" data-single-row={rows.length === 1 ? "true" : undefined}>
       {rows.map((row, index) => (
         <tr key={rowKey(row)} className={rowClassName?.(row)}>
           {renderRow(row, index)}
@@ -112,7 +112,7 @@ export function TableBody<T>({ rows, rowKey, rowClassName, renderRow, columns, e
       ))}
       {rows.length === 0 && (
         <tr>
-          <td colSpan={columns} className="px-6 py-8 text-center text-neutral-500">
+          <td colSpan={columns} className="px-6 py-8 text-center text-neutral-500 dark:text-neutral-400">
             {empty ?? "Nothing here yet."}
           </td>
         </tr>

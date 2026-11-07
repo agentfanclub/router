@@ -51,38 +51,38 @@ function ConnectClient() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-white px-6 py-16 text-neutral-800">
+    <main className="flex min-h-svh items-center justify-center bg-white dark:bg-neutral-950 px-6 py-16 text-neutral-800 dark:text-neutral-100">
       <section className="w-full max-w-[400px]" aria-labelledby="connect-title">
         <img src="/agent-fan-club.png" alt="Agent fan club" className="mb-7 -ml-2 h-auto w-40" />
         <h1 id="connect-title" className="text-xl font-medium tracking-tight">
           {status === "approved" ? `${clientName} approved` : status === "denied" ? "Connection declined" : `Connect ${clientName}`}
         </h1>
         {status === "approved" || status === "denied" ? (
-          <p role="status" className="mt-3 text-sm leading-6 text-neutral-500">
+          <p role="status" className="mt-3 text-sm leading-6 text-neutral-500 dark:text-neutral-400">
             {status === "approved" ? `Return to ${clientName} to finish connecting. You can disable or delete its key from API Keys.` : "This request was declined. You can close this page."}
           </p>
         ) : !validCode || loadError ? (
-          <p role="alert" className="mt-3 text-sm leading-6 text-red-700">{loadError || "This connection link is incomplete. Start again in your terminal."}</p>
+          <p role="alert" className="mt-3 text-sm leading-6 text-red-700 dark:text-red-400">{loadError || "This connection link is incomplete. Start again in your terminal."}</p>
         ) : !session ? (
           <>
-            <p className="mt-3 text-sm leading-6 text-neutral-500">Sign in to choose the account {clientName} will use.</p>
+            <p className="mt-3 text-sm leading-6 text-neutral-500 dark:text-neutral-400">Sign in to choose the account {clientName} will use.</p>
             <div className="mt-7">
               <Link to="/login" search={{ returnTo: `/connect/${client}?code=${code}` }} className="text-sm underline underline-offset-4">Sign in to Agent Fan Club</Link>
             </div>
           </>
         ) : (
           <>
-            <p className="mt-3 text-sm leading-6 text-neutral-500">{clientName} will receive an API key for <span className="break-all text-neutral-800">{session.user.email}</span> and can send model requests through your account.</p>
-            <p className="mt-5 text-[13px] leading-5 text-neutral-500">Only approve if you started this request in {clientName} and the code below matches your terminal.</p>
-            <code className="mt-3 block rounded border border-neutral-200 bg-neutral-50 px-3 py-3 text-center text-base tracking-wider">{code}</code>
-            <p className="mt-3 text-xs leading-5 text-neutral-500">This request expires 10 minutes after it starts. You can revoke access from API Keys at any time.</p>
+            <p className="mt-3 text-sm leading-6 text-neutral-500 dark:text-neutral-400">{clientName} will receive an API key for <span className="break-all text-neutral-800 dark:text-neutral-100">{session.user.email}</span> and can send model requests through your account.</p>
+            <p className="mt-5 text-[13px] leading-5 text-neutral-500 dark:text-neutral-400">Only approve if you started this request in {clientName} and the code below matches your terminal.</p>
+            <code className="mt-3 block rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-3 py-3 text-center text-base tracking-wider">{code}</code>
+            <p className="mt-3 text-xs leading-5 text-neutral-500 dark:text-neutral-400">This request expires 10 minutes after it starts. You can revoke access from API Keys at any time.</p>
             <div className="mt-7 flex justify-between gap-3">
               <Button variant="destructive" disabled={busy} onClick={() => answer("deny")}>Decline</Button>
               <Button loading={busy} onClick={() => answer("approve")}>Connect {clientName}</Button>
             </div>
           </>
         )}
-        {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-700">{error}</p>}
+        {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-700 dark:text-red-400">{error}</p>}
       </section>
     </main>
   );

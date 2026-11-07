@@ -20,11 +20,11 @@ export const Route = createFileRoute("/_dashboard/logs")({
 });
 
 const statusStyles: Record<UsageLogRow["status"], string> = {
-  pending: "text-neutral-500 bg-neutral-100 border-neutral-200",
-  ok: "text-emerald-700 bg-emerald-50 border-emerald-200",
-  error: "text-red-700 bg-red-50 border-red-200",
-  aborted: "text-neutral-500 bg-neutral-100 border-neutral-200",
-  denied: "text-amber-700 bg-amber-50 border-amber-200",
+  pending: "text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700",
+  ok: "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800",
+  error: "text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800",
+  aborted: "text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700",
+  denied: "text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800",
 };
 
 function Page() {
@@ -36,8 +36,8 @@ function Page() {
     <section className="mx-auto w-full max-w-[1008px] px-6 pb-6 pt-10 max-[480px]:px-4">
       <div className="mb-6">
         <h1 className="text-lg font-medium">Logs</h1>
-        <p className="mt-1 text-sm text-neutral-500">Your conversations, grouped by session.</p>
-        {model && <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">Model: {model}<Link to="/logs" search={{}} className="underline underline-offset-2">Clear filter</Link></div>}
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Your conversations, grouped by session.</p>
+        {model && <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">Model: {model}<Link to="/logs" search={{}} className="underline underline-offset-2">Clear filter</Link></div>}
       </div>
       <DataTable variant="logs" minWidth={760} caption="Sessions ordered by their most recent request.">
         <TableHead>
@@ -58,13 +58,13 @@ function Page() {
             <>
               <Td pad="start" className="whitespace-nowrap tabular-nums">{formatDateTime(item.lastAt)}</Td>
               <Td className="min-w-0">
-                <span className="block truncate text-neutral-800" title={item.models.split(",").join(", ")}>{item.models.split(",").join(", ")}</span>
+                <span className="block truncate text-neutral-800 dark:text-neutral-100" title={item.models.split(",").join(", ")}>{item.models.split(",").join(", ")}</span>
               </Td>
               <Td>
-                <span className="font-mono text-xs text-neutral-700" title={item.sessionId ?? item.id}>
+                <span className="font-mono text-xs text-neutral-700 dark:text-neutral-200" title={item.sessionId ?? item.id}>
                   {item.sessionId ? shortenSession(item.sessionId) : "Ungrouped request"}
                 </span>
-                <span className="mt-1 block text-xs text-neutral-400">{item.requests} {item.requests === 1 ? "request" : "requests"}</span>
+                <span className="mt-1 block text-xs text-neutral-400 dark:text-neutral-500">{item.requests} {item.requests === 1 ? "request" : "requests"}</span>
               </Td>
               <Td className="whitespace-nowrap tabular-nums">
                 {formatTokens(item.inputTokens)} → {formatTokens(item.outputTokens)}

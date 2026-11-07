@@ -25,14 +25,14 @@ function VerifyLink() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-white px-6 py-16 text-neutral-800">
+    <main className="flex min-h-svh items-center justify-center bg-white dark:bg-neutral-950 px-6 py-16 text-neutral-800 dark:text-neutral-100">
       <section className="w-full max-w-[360px]" aria-labelledby="verify-title">
         <img src="/agent-fan-club.png" alt="Agent fan club" className="mb-7 -ml-2 h-auto w-40" />
         <h1 id="verify-title" className="text-xl font-medium tracking-tight">{token ? "Confirm your sign-in" : "This sign-in link is incomplete"}</h1>
-        <p className="mt-1 text-[13px] leading-5 text-neutral-500">
+        <p className="mt-1 text-[13px] leading-5 text-neutral-500 dark:text-neutral-400">
           {token ? "You opened a sign-in link from your email. Click below to finish signing in to Router." : "Request a new link to sign in."}
         </p>
-        {token && <p className="mt-3 text-xs leading-5 text-neutral-400">Your link expires 5 minutes after the email was sent.</p>}
+        {token && <p className="mt-3 text-xs leading-5 text-neutral-400 dark:text-neutral-500">Your link expires 5 minutes after the email was sent.</p>}
         <div className="mt-9 flex justify-end">
           {token ? (
             <Button arrow loading={busy} onClick={signIn}>Confirm and sign in</Button>

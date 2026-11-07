@@ -52,7 +52,7 @@ function Page() {
     <section className="mx-auto w-full max-w-[1008px] px-6 pb-6 pt-10 max-[480px]:px-4">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-medium">Token Leaderboard</h1>
-        <div className="inline-flex rounded-lg bg-neutral-100 text-xs font-normal" role="group" aria-label="Leaderboard time range">
+        <div className="inline-flex rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-normal" role="group" aria-label="Leaderboard time range">
           {RANGES.map((range) => (
             <button
               key={range.days}
@@ -60,7 +60,7 @@ function Page() {
               aria-pressed={days === range.days}
               disabled={loading}
               onClick={() => setDays(range.days)}
-              className={`cursor-pointer rounded-lg border px-3 py-1.5 transition-colors disabled:cursor-wait ${days === range.days ? "border-neutral-300 bg-white text-neutral-900 shadow-sm" : "border-transparent text-neutral-600 hover:text-neutral-900"}`}
+              className={`cursor-pointer rounded-lg border px-3 py-1.5 transition-colors disabled:cursor-wait ${days === range.days ? "border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 shadow-sm" : "border-transparent text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-50"}`}
             >
               {range.label}
             </button>
@@ -68,9 +68,9 @@ function Page() {
         </div>
       </div>
 
-      {loading ? <p role="status" className="mt-4 text-sm text-neutral-500">Loading leaderboard…</p> : leaderboard ? (
+      {loading ? <p role="status" className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">Loading leaderboard…</p> : leaderboard ? (
         <>
-          <p className="mb-4 text-sm text-neutral-500">
+          <p className="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
             Total tokens used across all keys. Prompt tokens already include cached input, so they count once.
             {" "}{leaderboard.totals.totalTokens.toLocaleString("en-US")} tokens from {leaderboard.totals.users} {leaderboard.totals.users === 1 ? "person" : "people"}.
           </p>
@@ -90,15 +90,15 @@ function Page() {
               empty="No token usage in this range yet."
               renderRow={(entry, index) => (
                 <>
-                  <Td align="right" pad="start" className="tabular-nums text-neutral-400">{index + 1}</Td>
-                  <Td className="truncate text-neutral-800" title={entry.name || entry.email}>{entry.name || "—"}</Td>
+                  <Td align="right" pad="start" className="tabular-nums text-neutral-400 dark:text-neutral-500">{index + 1}</Td>
+                  <Td className="truncate text-neutral-800 dark:text-neutral-100" title={entry.name || entry.email}>{entry.name || "—"}</Td>
                   <Td className="truncate" title={entry.email}>{entry.email}</Td>
                   <Td className="tabular-nums">
-                    <span className="font-medium text-neutral-800" title={`${entry.totalTokens.toLocaleString("en-US")} tokens`}>{formatTokens(entry.totalTokens)}</span>
-                    <span className="mt-1 block h-1 overflow-hidden rounded-[2px] bg-neutral-200" aria-hidden="true">
-                      <span className="block h-full rounded-[2px] bg-neutral-700" style={{ width: `${maxTokens > 0 ? Math.max(entry.totalTokens / maxTokens * 100, 1) : 0}%` }} />
+                    <span className="font-medium text-neutral-800 dark:text-neutral-100" title={`${entry.totalTokens.toLocaleString("en-US")} tokens`}>{formatTokens(entry.totalTokens)}</span>
+                    <span className="mt-1 block h-1 overflow-hidden rounded-[2px] bg-neutral-200 dark:bg-neutral-700" aria-hidden="true">
+                      <span className="block h-full rounded-[2px] bg-neutral-700 dark:bg-neutral-200" style={{ width: `${maxTokens > 0 ? Math.max(entry.totalTokens / maxTokens * 100, 1) : 0}%` }} />
                     </span>
-                    <span className="mt-1 block whitespace-nowrap text-xs text-neutral-400">{entry.requests.toLocaleString("en-US")} {entry.requests === 1 ? "request" : "requests"} · {entry.sessions.toLocaleString("en-US")} {entry.sessions === 1 ? "session" : "sessions"}</span>
+                    <span className="mt-1 block whitespace-nowrap text-xs text-neutral-400 dark:text-neutral-500">{entry.requests.toLocaleString("en-US")} {entry.requests === 1 ? "request" : "requests"} · {entry.sessions.toLocaleString("en-US")} {entry.sessions === 1 ? "session" : "sessions"}</span>
                   </Td>
                   <Td align="right" className="whitespace-nowrap tabular-nums" title={`${entry.inputTokens.toLocaleString("en-US")} input tokens`}>{formatTokens(entry.inputTokens)}</Td>
                   <Td align="right" pad="end" className="whitespace-nowrap tabular-nums" title={`${entry.outputTokens.toLocaleString("en-US")} output tokens`}>{formatTokens(entry.outputTokens)}</Td>
@@ -108,7 +108,7 @@ function Page() {
           </DataTable>
         </>
       ) : (
-        <p role="alert" className="mt-4 text-sm text-red-700">{result.error} Reload the page to try again.</p>
+        <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-400">{result.error} Reload the page to try again.</p>
       )}
     </section>
   );

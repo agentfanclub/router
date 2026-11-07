@@ -37,7 +37,7 @@ function Page() {
         </p>
         <div className="mb-6">
           <h1 className="text-lg font-medium">Models</h1>
-          <p className="mt-1 text-sm text-neutral-500">Prices in USD per million tokens.</p>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Prices in USD per million tokens.</p>
         </div>
 
         <DataTable variant="models" minWidth={872} caption="Models with their IDs, features, and prices in USD per million tokens.">
@@ -57,9 +57,9 @@ function Page() {
               <>
                 <Td pad="start" className="min-w-0 px-6">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-neutral-800" title={model.name}>{model.name}</span>
+                    <span className="truncate text-neutral-800 dark:text-neutral-100" title={model.name}>{model.name}</span>
                     {model.cost.input === 0 && model.cost.output === 0 && (
-                      <span className="rounded border border-neutral-200 bg-neutral-100 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">Free</span>
+                      <span className="rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500 dark:text-neutral-400">Free</span>
                     )}
                   </div>
                   <button
@@ -74,11 +74,11 @@ function Page() {
                         setCopyResult({ id: model.id, status: "error" });
                       }
                     }}
-                    className="group mt-1 flex max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-xs text-neutral-400 hover:text-neutral-600 focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+                    className="group mt-1 flex max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-500 focus-visible:ring-offset-2"
                   >
                     <code className="truncate font-mono">{model.id}</code>
                     {copyResult?.id === model.id && copyResult.status === "copied" ? (
-                      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-green-600">
+                      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-green-600 dark:text-green-400">
                         <Check size={12} aria-hidden="true" /> Copied
                       </span>
                     ) : (
@@ -86,7 +86,7 @@ function Page() {
                     )}
                   </button>
                   {copyResult?.id === model.id && copyResult.status === "error" && (
-                    <span className="mt-1 block text-xs text-red-600">Couldn't copy. Try again.</span>
+                    <span className="mt-1 block text-xs text-red-600 dark:text-red-400">Couldn't copy. Try again.</span>
                   )}
                 </Td>
                 <Td className="flex items-center gap-1">
@@ -102,14 +102,14 @@ function Page() {
                     return (
                       <Tooltip.Root key={feature}>
                         <Tooltip.Trigger asChild>
-                          <button type="button" aria-label={label} className="inline-flex size-6 cursor-help items-center justify-center rounded-[5px] border border-neutral-200/70 bg-neutral-100 text-neutral-500 hover:bg-neutral-200/70 focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2">
+                          <button type="button" aria-label={label} className="inline-flex size-6 cursor-help items-center justify-center rounded-[5px] border border-neutral-200/70 bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200/70 focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-500 focus-visible:ring-offset-2">
                             <Icon size={12} aria-hidden="true" />
                           </button>
                         </Tooltip.Trigger>
                         <Tooltip.Portal>
                           <Tooltip.Content side="top" sideOffset={6} className="z-50 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white shadow-sm">
                             {label}
-                            <Tooltip.Arrow className="fill-neutral-800" />
+                            <Tooltip.Arrow className="fill-neutral-800 dark:fill-neutral-100" />
                           </Tooltip.Content>
                         </Tooltip.Portal>
                       </Tooltip.Root>
@@ -118,7 +118,7 @@ function Page() {
                 </Td>
                 {[model.cost.input, model.cost.output, model.cost.cache_read, model.cost.cache_write].map((price, index) => (
                   <Td key={index} align="right" className="px-4 tabular-nums last:pr-6">
-                    {price == null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
+                    {price == null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400 dark:text-neutral-500"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
                   </Td>
                 ))}
               </>

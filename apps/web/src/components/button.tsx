@@ -16,8 +16,8 @@ export function Button({ children, variant = "default", arrow = false, loading =
         "inline-grid cursor-pointer items-center justify-center rounded-[7px] text-white transition-[transform,box-shadow,filter] duration-[120ms] ease-[ease] enabled:hover:brightness-115 enabled:active:translate-y-px disabled:cursor-default disabled:not-aria-busy:opacity-50 motion-reduce:transition-none",
         variant === "illinois"
           ? "min-h-11 border-0 bg-[#0085ff] px-4 py-2.5 text-sm font-medium antialiased shadow-none"
-          : "min-h-[30px] border border-transparent bg-[linear-gradient(180deg,#626262_0%,#484848_8%,#292929_24%,#171717_65%,#141414_100%)] px-3 py-[5px] text-xs font-normal leading-[18px] shadow-[0_2px_4px_rgb(0_0_0_/_18%)] enabled:active:shadow-[0_1px_2px_rgb(0_0_0_/_14%)]",
-        variant === "destructive" && "bg-[linear-gradient(180deg,#f08080_0%,#e25454_8%,#cc3030_24%,#b91c1c_65%,#a71919_100%)]",
+          : "min-h-[30px] border border-transparent dark:border-neutral-600 dark:bg-[linear-gradient(180deg,#414141_0%,#303030_12%,#252525_65%,#202020_100%)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_8%),0_2px_4px_rgb(0_0_0_/_30%)] bg-[linear-gradient(180deg,#626262_0%,#484848_8%,#292929_24%,#171717_65%,#141414_100%)] px-3 py-[5px] text-xs font-normal leading-[18px] shadow-[0_2px_4px_rgb(0_0_0_/_18%)] enabled:active:shadow-[0_1px_2px_rgb(0_0_0_/_14%)]",
+        variant === "destructive" && "dark:border-red-700 dark:bg-[linear-gradient(180deg,#d45b5b_0%,#b83838_12%,#982626_65%,#842020_100%)] bg-[linear-gradient(180deg,#f08080_0%,#e25454_8%,#cc3030_24%,#b91c1c_65%,#a71919_100%)]",
         className,
       )}
       disabled={disabled || loading}

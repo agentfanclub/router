@@ -75,7 +75,7 @@ function Page() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           <div>
             <h1 className="text-lg font-medium">API Keys</h1>
-            <p className="mt-1 text-sm text-neutral-500">Manage the keys your apps use to access Router.</p>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">Manage the keys your apps use to access Router.</p>
           </div>
           <DialogTrigger asChild>
             <Button>
@@ -118,13 +118,13 @@ function Page() {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="e.g. Production"
-                className="h-9 rounded-[5px] border border-neutral-300 bg-white px-2.5 text-[13px] outline-none placeholder:text-neutral-400 focus-visible:border-neutral-500 "
+                className="h-9 rounded-[5px] border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-950 px-2.5 text-[13px] outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus-visible:border-neutral-500 dark:focus-visible:border-neutral-400 "
               />
             </div>}
             {token && (
-              <div className="grid gap-3 rounded-md border border-green-200 bg-green-50 p-3" role="status">
-                <p className="text-xs font-medium text-green-900">Your API key is ready. Copy it now. You won't be able to see it again.</p>
-                <code className="select-all break-all rounded border border-green-200 bg-white p-2 font-mono text-xs text-neutral-800">{token}</code>
+              <div className="grid gap-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-3" role="status">
+                <p className="text-xs font-medium text-green-900 dark:text-green-200">Your API key is ready. Copy it now. You won't be able to see it again.</p>
+                <code className="select-all break-all rounded border border-green-200 dark:border-green-800 bg-white dark:bg-neutral-950 p-2 font-mono text-xs text-neutral-800 dark:text-neutral-100">{token}</code>
                 <Button type="button" onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(token);
@@ -139,13 +139,13 @@ function Page() {
                 </Button>
               </div>
             )}
-            {createError && <p role="alert" className="text-xs text-red-700">{createError}</p>}
+            {createError && <p role="alert" className="text-xs text-red-700 dark:text-red-400">{createError}</p>}
             <DialogFooter>
               <DialogClose asChild>
                 <button
                   type="button"
                   disabled={saving}
-                  className="min-h-8 cursor-pointer rounded-[7px] border border-neutral-200 bg-white px-3 text-xs text-neutral-600 hover:bg-neutral-50 "
+                  className="min-h-8 cursor-pointer rounded-[7px] border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-950 px-3 text-xs text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900 "
                 >
                   {token ? "Done" : "Cancel"}
                 </button>
@@ -156,7 +156,7 @@ function Page() {
         </DialogContent>
       </Dialog>
 
-      {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
+      {error && <p role="alert" className="mb-4 text-sm text-red-700 dark:text-red-400">{error}</p>}
 
       <DataTable variant="api-keys" minWidth={760} caption="API keys with their name, masked token, creation date, and enabled status.">
         <TableHead>
@@ -186,9 +186,9 @@ function Page() {
                 <span className="block truncate" title={key.name}>{key.name}</span>
               </Td>
               <Td className="flex h-10 min-w-0 items-center px-5">
-                <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-500">{`sk-afcrouter-••••••••••••${key.lastFive}`}</code>
+                <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 dark:bg-neutral-800 px-2 py-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{`sk-afcrouter-••••••••••••${key.lastFive}`}</code>
               </Td>
-              <Td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500">
+              <Td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500 dark:text-neutral-400">
                 <time dateTime={key.createdAt}>{dateFormatter.format(new Date(key.createdAt))}</time>
               </Td>
               <Td align="right" className="flex h-10 items-center justify-end">
@@ -199,10 +199,10 @@ function Page() {
                   aria-label={`Enable ${key.name}`}
                   disabled={pendingIds.includes(key.id)}
                   onClick={() => void changeKey(key.id, !key.enabled)}
-                  className={`inline-flex h-6 w-11 cursor-pointer items-center rounded-full border p-[3px] align-middle shadow-inner transition-colors motion-reduce:transition-none ${key.enabled ? "border-green-600 bg-green-600 hover:bg-green-700" : "border-neutral-300 bg-neutral-200 hover:bg-neutral-300"}`}
+                  className={`inline-flex h-6 w-11 cursor-pointer items-center rounded-full border p-[3px] align-middle shadow-inner transition-colors motion-reduce:transition-none ${key.enabled ? "border-green-600 bg-green-600 hover:bg-green-700" : "border-neutral-300 dark:border-neutral-600 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600"}`}
                 >
-                  <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0_/_20%)] transition-transform motion-reduce:transition-none ${key.enabled ? "translate-x-5" : "translate-x-0"}`}>
-                    {key.enabled && <Check size={10} strokeWidth={3} className="text-green-600" />}
+                  <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full bg-white dark:bg-neutral-950 shadow-[0_1px_3px_rgb(0_0_0_/_20%)] transition-transform motion-reduce:transition-none ${key.enabled ? "translate-x-5" : "translate-x-0"}`}>
+                    {key.enabled && <Check size={10} strokeWidth={3} className="text-green-600 dark:text-green-400" />}
                   </span>
                 </button>
               </Td>
@@ -213,7 +213,7 @@ function Page() {
                     setError("");
                   }}>
                     <DialogTrigger asChild>
-                      <button type="button" aria-label={`Delete ${key.name}`} title="Delete key" className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600">
+                      <button type="button" aria-label={`Delete ${key.name}`} title="Delete key" className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-600 dark:hover:text-red-400">
                         <Trash2 size={14} aria-hidden="true" />
                       </button>
                     </DialogTrigger>
@@ -226,9 +226,9 @@ function Page() {
                       </DialogHeader>
                       <DialogFooter>
                         <DialogClose asChild>
-                          <button type="button" disabled={pendingIds.includes(key.id)} className="min-h-8 cursor-pointer rounded-[7px] border border-neutral-200 bg-white px-3 text-xs text-neutral-600 hover:bg-neutral-50">Cancel</button>
+                          <button type="button" disabled={pendingIds.includes(key.id)} className="min-h-8 cursor-pointer rounded-[7px] border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-950 px-3 text-xs text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900">Cancel</button>
                         </DialogClose>
-                        {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
+                        {error && <p role="alert" className="text-xs text-red-700 dark:text-red-400">{error}</p>}
                         <Button variant="destructive" disabled={pendingIds.includes(key.id)} onClick={() => void changeKey(key.id)}>
                           {pendingIds.includes(key.id) ? "Deleting…" : "Delete key"}
                         </Button>

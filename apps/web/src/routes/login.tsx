@@ -97,12 +97,12 @@ function Login() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-white px-6 py-16 text-neutral-800">
+    <main className="flex min-h-svh items-center justify-center bg-white dark:bg-neutral-950 px-6 py-16 text-neutral-800 dark:text-neutral-100">
       <section className="w-full max-w-[360px]" aria-labelledby="login-title">
         <img src="/agent-fan-club.png" alt="Agent fan club" className="mb-7 -ml-2 h-auto w-40" />
         <h1 id="login-title" className="text-xl font-medium tracking-tight">{sent ? "Check your email" : "Sign in with your NetID"}</h1>
-        <p className="mt-1 text-[13px] leading-5 text-neutral-500">
-          {sent ? <>Click the link we sent to <span className="break-all text-neutral-700">{email}</span> or enter the code below.</> : "We'll create an account if you don't have one."}
+        <p className="mt-1 text-[13px] leading-5 text-neutral-500 dark:text-neutral-400">
+          {sent ? <>Click the link we sent to <span className="break-all text-neutral-700 dark:text-neutral-200">{email}</span> or enter the code below.</> : "We'll create an account if you don't have one."}
         </p>
 
         {!sent ? (
@@ -113,16 +113,16 @@ function Login() {
                 Sign in with Illinois
               </Button>
             </div>
-            <div className="mt-6 flex items-center gap-3 text-xs text-neutral-400">
-              <span className="h-px flex-1 bg-neutral-200" />
+            <div className="mt-6 flex items-center gap-3 text-xs text-neutral-400 dark:text-neutral-500">
+              <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
               <span>or use an email link or code</span>
-              <span className="h-px flex-1 bg-neutral-200" />
+              <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-700" />
             </div>
             <form onSubmit={send} className="mt-6 space-y-4">
               <label htmlFor="netid" className="sr-only">Illinois NetID</label>
-              <div className="flex items-center rounded-[5px] border border-neutral-300 bg-linear-to-b from-neutral-50 to-white shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] focus-within:border-neutral-500 ">
-                <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400" placeholder="netid" />
-                <span id="email-domain" className="pr-3 text-[13px] text-neutral-400">@illinois.edu</span>
+              <div className="flex items-center rounded-[5px] border border-neutral-300 dark:border-neutral-700 bg-linear-to-b from-neutral-50 dark:from-[#111111] to-white dark:to-[#191919] shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] dark:shadow-[inset_0_1px_3px_rgb(0_0_0_/_35%),0_1px_0_rgb(255_255_255_/_3%)] focus-within:border-neutral-500 dark:focus-within:border-neutral-400 ">
+                <input id="netid" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required pattern="[a-zA-Z][a-zA-Z0-9]*" title="Enter just your NetID, without @illinois.edu" value={netid} onChange={(event) => setNetid(event.target.value)} disabled={busy} aria-describedby="email-domain" className="min-w-0 flex-1 bg-transparent py-2.5 pl-3 text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-400" placeholder="netid" />
+                <span id="email-domain" className="pr-3 text-[13px] text-neutral-400 dark:text-neutral-400">@illinois.edu</span>
               </div>
               <div className="flex justify-end">
                 <Button type="submit" arrow loading={busy}>Continue</Button>
@@ -134,7 +134,7 @@ function Login() {
             <div role="group" aria-label="Sign-in code" aria-describedby="code-expiry" className="flex items-center">
               {otp.map((digit, index) => (
                 <Fragment key={index}>
-                  {index === 3 && <span aria-hidden="true" className="px-3 text-neutral-400">-</span>}
+                  {index === 3 && <span aria-hidden="true" className="px-3 text-neutral-400 dark:text-neutral-500">-</span>}
                   <input
                     ref={(input) => { otpInputs.current[index] = input; }}
                     aria-label={`Digit ${index + 1}`}
@@ -164,19 +164,19 @@ function Login() {
                         otpInputs.current[index + (event.key === "ArrowLeft" ? -1 : 1)]?.focus();
                       }
                     }}
-                    className="h-11 min-w-0 flex-1 rounded-none border border-neutral-300 bg-linear-to-b from-neutral-50 to-white text-center text-lg shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] outline-none focus:relative focus:z-1 focus:border-neutral-500 disabled:opacity-50 [&:nth-of-type(3n+1)]:rounded-l-[5px] [&:nth-of-type(3n)]:rounded-r-[5px] [&:not(:nth-of-type(3n+1))]:-ml-px"
+                    className="h-11 min-w-0 flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-linear-to-b from-neutral-50 dark:from-[#111111] to-white dark:to-[#191919] text-center text-lg shadow-[inset_0_1px_2px_rgb(0_0_0_/_3%)] dark:shadow-[inset_0_1px_3px_rgb(0_0_0_/_35%),0_1px_0_rgb(255_255_255_/_3%)] outline-none focus:relative focus:z-1 focus:border-neutral-500 dark:focus:border-neutral-400 disabled:opacity-50 [&:nth-of-type(3n+1)]:rounded-l-[5px] [&:nth-of-type(3n)]:rounded-r-[5px] [&:not(:nth-of-type(3n+1))]:-ml-px"
                   />
                 </Fragment>
               ))}
             </div>
-            <p id="code-expiry" className="text-xs text-neutral-400">The link and code expire in 5 minutes.</p>
+            <p id="code-expiry" className="text-xs text-neutral-400 dark:text-neutral-500">The link and code expire in 5 minutes.</p>
             <div className="flex items-center justify-between gap-4">
-              <button type="button" disabled={busy} onClick={() => { setSent(false); setNetid(""); setError(""); setOtp(Array(6).fill("")); }} className="cursor-pointer text-xs text-neutral-500 underline decoration-neutral-300 underline-offset-4 transition-colors enabled:hover:text-neutral-900 enabled:hover:decoration-neutral-700 disabled:cursor-default disabled:opacity-50 motion-reduce:transition-none">Try another email</button>
+              <button type="button" disabled={busy} onClick={() => { setSent(false); setNetid(""); setError(""); setOtp(Array(6).fill("")); }} className="cursor-pointer text-xs text-neutral-500 dark:text-neutral-400 underline decoration-neutral-300 underline-offset-4 transition-colors enabled:hover:text-neutral-900 dark:enabled:hover:text-neutral-50 enabled:hover:decoration-neutral-700 disabled:cursor-default disabled:opacity-50 motion-reduce:transition-none">Try another email</button>
               <Button type="submit" arrow loading={busy}>Sign in</Button>
             </div>
           </form>
         )}
-        {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-700">{error}</p>}
+        {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-700 dark:text-red-400">{error}</p>}
       </section>
     </main>
   );

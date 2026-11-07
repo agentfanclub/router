@@ -77,25 +77,25 @@ function Page() {
 
       <section className="mb-6" aria-labelledby="lumen-usage-heading">
         <h2 id="lumen-usage-heading" className="text-base font-medium">Lumen usage</h2>
-        <p className="mt-1 text-sm text-neutral-500">
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
           Cumulative usage across all users sharing the router's Lumen API key. The available coin balance is shared across the Lumen account.
         </p>
         {usageFields ? (
-          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 bg-neutral-200 sm:grid-cols-4">
+          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-200 dark:bg-neutral-700 sm:grid-cols-4">
             {usageFields.map(([label, value]) => (
-              <div key={label} className="bg-white p-4">
-                <dt className="text-xs text-neutral-500">{label}</dt>
-                <dd className="mt-2 break-words text-sm font-medium tabular-nums text-neutral-800">{value}</dd>
+              <div key={label} className="bg-white dark:bg-neutral-950 p-4">
+                <dt className="text-xs text-neutral-500 dark:text-neutral-400">{label}</dt>
+                <dd className="mt-2 break-words text-sm font-medium tabular-nums text-neutral-800 dark:text-neutral-100">{value}</dd>
               </div>
             ))}
           </dl>
         ) : (
-          <p role="alert" className="mt-4 text-sm text-red-700">{lumenResult.error} Reload the page to try again.</p>
+          <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-400">{lumenResult.error} Reload the page to try again.</p>
         )}
       </section>
 
       <section className="mb-6" aria-label="Router usage">
-        {loading ? <p role="status" className="mt-4 text-sm text-neutral-500">Loading usage…</p> : adminResult.usage ? (
+        {loading ? <p role="status" className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">Loading usage…</p> : adminResult.usage ? (
           <>
             <DailyUsage
               history={adminResult.usage.history.map((row) => ({ day: row.day, model: row.model, value: unit === "coins" ? row.costMicro / 1_000_000 : row.tokens }))}
@@ -125,21 +125,21 @@ function Page() {
                   const spend = adminResult.usage!.perUser.find((row) => row.userId === user.id);
                   return (
                     <>
-                      <Td pad="start" className="truncate px-5 text-neutral-800" title={user.name}>{user.name || "—"}</Td>
+                      <Td pad="start" className="truncate px-5 text-neutral-800 dark:text-neutral-100" title={user.name}>{user.name || "—"}</Td>
                       <Td className="truncate" title={user.email}>{user.email}</Td>
                       <Td>
-                        <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
+                        <span className="rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs">{user.role}</span>
                       </Td>
                       <Td className="whitespace-nowrap tabular-nums">
                         {spend
                           ? <>
-                              <span className="text-neutral-800">{formatUsdMicro(spend.clubMicro)}</span>
+                              <span className="text-neutral-800 dark:text-neutral-100">{formatUsdMicro(spend.clubMicro)}</span>
                               {spend.personalMicro > 0 && (
-                                <span className="text-neutral-400" title="Spend on the user's personal Lumen key">
+                                <span className="text-neutral-400 dark:text-neutral-500" title="Spend on the user's personal Lumen key">
                                   {" "}+ {formatUsdMicro(spend.personalMicro)} personal
                                 </span>
                               )}
-                              <span className="block text-xs text-neutral-400">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
+                              <span className="block text-xs text-neutral-400 dark:text-neutral-500">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
                             </>
                           : "—"}
                       </Td>
@@ -171,7 +171,7 @@ function Page() {
                   columns={5}
                   renderRow={(row) => (
                     <>
-                      <Td pad="start" className="truncate px-5 text-neutral-800" title={row.model}>{row.model}</Td>
+                      <Td pad="start" className="truncate px-5 text-neutral-800 dark:text-neutral-100" title={row.model}>{row.model}</Td>
                       <Td className="tabular-nums">{row.requests.toLocaleString("en-US")}</Td>
                       <Td className="tabular-nums">{row.inputTokens.toLocaleString("en-US")}</Td>
                       <Td className="tabular-nums">{row.outputTokens.toLocaleString("en-US")}</Td>
@@ -183,7 +183,7 @@ function Page() {
             )}
           </>
         ) : (
-          <p role="alert" className="mt-4 text-sm text-red-700">{adminResult.error} Reload the page to try again.</p>
+          <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-400">{adminResult.error} Reload the page to try again.</p>
         )}
       </section>
     </section>
@@ -232,13 +232,13 @@ function LimitsEditor({ userId, fiveHourMicro, weeklyMicro }: {
 
   return (
     <details className="group">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs tabular-nums text-neutral-700 hover:border-neutral-400">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-2 py-1 text-xs tabular-nums text-neutral-700 dark:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-500">
         {formatUsdMicro(effectiveFiveHour)} / {formatUsdMicro(effectiveWeekly)}
-        <span className="text-neutral-400 group-open:hidden">edit</span>
+        <span className="text-neutral-400 dark:text-neutral-500 group-open:hidden">edit</span>
       </summary>
       <form onSubmit={save} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         <label className="flex items-center gap-1">
-          <span className="text-neutral-500">5h $</span>
+          <span className="text-neutral-500 dark:text-neutral-400">5h $</span>
           <input
             name="fiveHour"
             type="number"
@@ -246,11 +246,11 @@ function LimitsEditor({ userId, fiveHourMicro, weeklyMicro }: {
             step="0.5"
             defaultValue={fiveHourMicro === null ? "" : fiveHourMicro / 1_000_000}
             placeholder={String(effectiveFiveHour / 1_000_000)}
-            className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
+            className="w-20 rounded border border-neutral-200 dark:border-neutral-700 px-1.5 py-1 tabular-nums"
           />
         </label>
         <label className="flex items-center gap-1">
-          <span className="text-neutral-500">week $</span>
+          <span className="text-neutral-500 dark:text-neutral-400">week $</span>
           <input
             name="weekly"
             type="number"
@@ -258,18 +258,18 @@ function LimitsEditor({ userId, fiveHourMicro, weeklyMicro }: {
             step="0.5"
             defaultValue={weeklyMicro === null ? "" : weeklyMicro / 1_000_000}
             placeholder={String(effectiveWeekly / 1_000_000)}
-            className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
+            className="w-20 rounded border border-neutral-200 dark:border-neutral-700 px-1.5 py-1 tabular-nums"
           />
         </label>
         <button
           type="submit"
           disabled={busy}
-          className="cursor-pointer rounded bg-neutral-800 px-2.5 py-1 text-white disabled:cursor-wait disabled:text-neutral-400"
+          className="cursor-pointer rounded bg-neutral-800 px-2.5 py-1 text-white disabled:cursor-wait disabled:text-neutral-400 dark:disabled:text-neutral-500"
         >
           {busy ? "Saving…" : "Save"}
         </button>
-        {error && <span role="alert" className="text-red-700">{error}</span>}
-        <span className="w-full text-neutral-400">Empty fields fall back to the club defaults.</span>
+        {error && <span role="alert" className="text-red-700 dark:text-red-400">{error}</span>}
+        <span className="w-full text-neutral-400 dark:text-neutral-500">Empty fields fall back to the club defaults.</span>
       </form>
     </details>
   );

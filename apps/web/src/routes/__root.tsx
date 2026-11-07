@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { RouteGame } from "../components/route-game";
+import { ThemeProvider, themeScript } from "../components/theme-provider";
 import stylesheet from "../styles.css?url";
 
 // Runs before hydration so the first client-side data request already carries
@@ -20,7 +21,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Router" },
     ],
-    scripts: [{ children: timezoneCookieScript }],
+    scripts: [{ children: themeScript }, { children: timezoneCookieScript }],
   }),
   component: Root,
   notFoundComponent: RouteGame,
@@ -28,12 +29,12 @@ export const Route = createRootRoute({
 
 function Root() {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
       <body>
-        <Outlet />
+        <ThemeProvider><Outlet /></ThemeProvider>
         <Scripts />
       </body>
     </html>

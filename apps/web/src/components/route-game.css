@@ -1,9 +1,9 @@
 .route-game {
   min-height: 100dvh;
-  background: white;
-  color: #262626;
+  background: var(--surface);
+  color: var(--text);
   font-family: var(--font-sans);
-  color-scheme: light;
+  color-scheme: inherit;
 }
 .route-game * {
   box-sizing: border-box;
@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--edge);
 }
 .route-header img {
   width: 140px;
@@ -27,10 +27,10 @@
   gap: 7px;
   text-decoration: none;
   font-size: 12px;
-  color: #737373;
+  color: var(--muted-text);
 }
 .route-home:hover {
-  color: #262626;
+  color: var(--text);
 }
 .route-main {
   max-width: 490px;
@@ -42,14 +42,14 @@
   align-items: center;
   gap: 9px;
   font-size: 12px;
-  color: #737373;
+  color: var(--muted-text);
 }
 .route-code {
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--edge);
   border-radius: 5px;
-  background: linear-gradient(#fafafa, #f5f5f5);
+  background: linear-gradient(var(--stripe), var(--stripe));
   padding: 2px 7px;
-  color: #737373;
+  color: var(--muted-text);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -63,20 +63,20 @@
 .route-heading > p {
   font-size: 13px;
   line-height: 1.8;
-  color: #737373;
+  color: var(--muted-text);
   margin: 0;
 }
 .route-panel {
   margin-top: 29px;
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--edge);
   border-radius: 11px;
   overflow: hidden;
-  background: white;
+  background: var(--surface);
   box-shadow: 0 2px 4px #00000003;
 }
 .route-panel-heading {
   padding: 14px 20px;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--edge);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -104,7 +104,7 @@
   justify-content: space-between;
   align-items: center;
   font-size: 10px;
-  color: #737373;
+  color: var(--muted-text);
   margin-bottom: 12px;
 }
 .route-board-labels span {
@@ -125,8 +125,8 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
-  background: #f7f7f7;
-  border: 1px solid #ebebeb;
+  background: var(--stripe);
+  border: 1px solid var(--edge);
   border-radius: 8px;
   padding: 6px;
 }
@@ -135,8 +135,8 @@
   position: relative;
   display: block;
   padding: 0;
-  background: linear-gradient(#fff, #fcfcfc);
-  border: 1px solid #e5e5e5;
+  background: linear-gradient(var(--surface), var(--surface));
+  border: 1px solid var(--edge);
   border-radius: 5px;
   box-shadow: 0 1px 1px #00000005;
   cursor: pointer;
@@ -148,7 +148,7 @@
 }
 .route-tile:hover {
   border-color: #a3a3a3;
-  background: #f5f5f5;
+  background: var(--stripe);
   box-shadow: 0 1px 4px #0000000d;
 }
 .route-tile svg {
@@ -160,7 +160,7 @@
 }
 .route-pipe {
   transform-origin: 32px 32px;
-  color: #d4d4d4;
+  color: var(--edge);
   transition: color 0.2s;
 }
 .route-pipe path {
@@ -173,19 +173,19 @@
   fill: currentColor;
 }
 .route-tile.connected {
-  background: #f4f4f4;
+  background: var(--stripe);
   border-color: #b8b8b8;
 }
 .route-tile.connected .route-pipe {
-  color: #404040;
+  color: var(--text);
 }
 .route-tile.hinted {
-  outline: 2px dashed #737373;
+  outline: 2px dashed var(--muted-text);
   outline-offset: 2px;
   z-index: 1;
 }
 .route-game :is(button, a):focus-visible {
-  outline: 2px solid #737373;
+  outline: 2px solid var(--muted-text);
   outline-offset: 3px;
   z-index: 2;
 }
@@ -195,12 +195,12 @@
   left: 5px;
   font-size: 6px;
   letter-spacing: 0.5px;
-  color: #737373;
+  color: var(--muted-text);
   pointer-events: none;
 }
 .route-packet {
-  fill: white;
-  stroke: #404040;
+  fill: var(--surface);
+  stroke: var(--text);
   stroke-width: 2;
   animation: packet-pulse 1.7s infinite;
 }
@@ -209,7 +209,7 @@
   top: calc(50% - 3px);
   width: 15px;
   height: 6px;
-  background: #404040;
+  background: var(--text);
   z-index: 1;
   border-radius: 2px;
 }
@@ -218,7 +218,7 @@
 }
 .route-output {
   right: -11px;
-  background: #d4d4d4;
+  background: var(--edge);
 }
 .route-output.delivered {
   background: #408458;
@@ -237,7 +237,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--edge);
 }
 .route-controls > div {
   display: flex;
@@ -249,14 +249,14 @@
   gap: 6px;
   border: 0;
   background: none;
-  color: #737373;
+  color: var(--muted-text);
   cursor: pointer;
   font: inherit;
   font-size: 11px;
   padding: 6px 0;
 }
 .route-secondary:hover {
-  color: #262626;
+  color: var(--text);
 }
 .route-secondary:disabled {
   opacity: 0.35;
@@ -372,7 +372,7 @@
   justify-content: center;
   gap: 10px;
   font-size: 12px;
-  color: #737373;
+  color: var(--muted-text);
 }
 
 .route-feedback {
@@ -380,8 +380,13 @@
   padding: 0 20px 15px;
   font-size: 11px;
   line-height: 1.7;
-  color: #737373;
+  color: var(--muted-text);
 }
 .route-feedback.success {
   color: #37734d;
+}
+
+.dark .is-solved .route-tile.connected {
+  background: #14251a;
+  border-color: #408458;
 }

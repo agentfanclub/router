@@ -1,17 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, lt, lte } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Effect, Layer } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Effect, Layer, Schema } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { deviceAuthorization } from "../db/schema";
-import { deviceClients, isDeviceClient } from "../device-clients";
+import { deviceClients, type DeviceClient } from "../device-clients";
+import { ApiError, decodeBody, failWith } from "../http";
 import { UserSession, userAuth } from "../middleware/user-auth";
-import { WorkerEnv } from "../worker-env";
+import { Db, query, WorkerEnv } from "../services";
 import { createDeviceApiKey } from "../util/keys";
 
 const requestLifetimeMs = 10 * 60 * 1000;
 const pollIntervalSeconds = 5;
-const codePattern = /^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/;
 const noStore = { "Cache-Control": "no-store" };
 
 const approvalFields = {
@@ -25,80 +24,78 @@ export type DeviceApproval = Pick<typeof deviceAuthorization.$inferSelect, "clie
   expiresAt: string;
 };
 
+const UserCode = Schema.String.check(Schema.isPattern(/^[A-F0-9]{4}(?:-[A-F0-9]{4}){3}$/));
+
+const userCode = (message: string) => HttpRouter.schemaParams(Schema.Struct({ code: UserCode })).pipe(
+  Effect.map(({ code }) => code),
+  Effect.mapError(() => new ApiError({ status: 400, message })),
+);
+
+const Decision = Schema.Struct({ decision: Schema.Literals(["approve", "deny"]) });
+
+const CodeRequest = Schema.Struct({
+  client: Schema.Literals(Object.keys(deviceClients) as [DeviceClient, ...DeviceClient[]]),
+});
+
+const TokenRequest = Schema.Struct({
+  deviceCode: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+});
+
+// OAuth device flow errors are bare error codes.
+const oauthError = (error: string) => failWith(400, error, noStore);
+
 const approvalRoutes = Layer.mergeAll(
-  HttpRouter.add("GET", "/api/device/authorization/:code", Effect.gen(function* () {
-    const env = yield* WorkerEnv;
-
-    const { code } = yield* HttpRouter.params;
-    if (!code || !codePattern.test(code)) {
-      return HttpServerResponse.jsonUnsafe({ error: "Invalid connection code." }, { status: 400 });
-    }
-
-    const [attempt] = yield* Effect.promise(() => drizzle(env.DB)
+  HttpRouter.add("GET", "/api/device/authorization/:code", Effect.fn("getDeviceAuthorization")(function* () {
+    const code = yield* userCode("Invalid connection code.");
+    const [attempt] = yield* query((db) => db
       .select(approvalFields)
       .from(deviceAuthorization)
       .where(and(eq(deviceAuthorization.userCode, code), gt(deviceAuthorization.expiresAt, new Date())))
       .limit(1));
-
     if (!attempt) {
-      return HttpServerResponse.jsonUnsafe({ error: "This connection code has expired or was already used. Start again in your terminal." }, { status: 404 });
+      return yield* failWith(404, "This connection code has expired or was already used. Start again in your terminal.");
     }
-
     return HttpServerResponse.jsonUnsafe(attempt);
   })),
 
-  HttpRouter.add("POST", "/api/device/authorization/:code", (request) => Effect.gen(function* () {
+  HttpRouter.add("POST", "/api/device/authorization/:code", Effect.fn("answerDeviceAuthorization")(function* () {
     const env = yield* WorkerEnv;
     const session = yield* UserSession;
+    const request = yield* HttpServerRequest.HttpServerRequest;
     if (request.headers.origin !== new URL(env.BETTER_AUTH_URL).origin) {
-      return HttpServerResponse.jsonUnsafe({ error: "Invalid request origin." }, { status: 403 });
+      return yield* failWith(403, "Invalid request origin.");
     }
+    const code = yield* userCode("Invalid connection request.");
+    const { decision } = yield* decodeBody(Decision, "Invalid connection request.");
 
-    const { code } = yield* HttpRouter.params;
-    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
-    if (!code || !codePattern.test(code) || !body || typeof body !== "object" ||
-      !("decision" in body) || (body.decision !== "approve" && body.decision !== "deny")) {
-      return HttpServerResponse.jsonUnsafe({ error: "Invalid connection request." }, { status: 400 });
-    }
-
-    const status = body.decision === "approve" ? "approved" : "denied";
-    const [attempt] = yield* Effect.promise(() => drizzle(env.DB)
+    const [attempt] = yield* query((db) => db
       .update(deviceAuthorization)
-      .set({ status, userId: session.user.id })
+      .set({ status: decision === "approve" ? "approved" : "denied", userId: session.user.id })
       .where(and(
         eq(deviceAuthorization.userCode, code),
         eq(deviceAuthorization.status, "pending"),
         gt(deviceAuthorization.expiresAt, new Date()),
       ))
       .returning(approvalFields));
-
     if (!attempt) {
-      return HttpServerResponse.jsonUnsafe({ error: "This request has expired or was already answered. Start again in your terminal." }, { status: 409 });
+      return yield* failWith(409, "This request has expired or was already answered. Start again in your terminal.");
     }
-
     return HttpServerResponse.jsonUnsafe(attempt);
   })),
 ).pipe(Layer.provide(userAuth));
 
 export const deviceAuthRoutes = Layer.mergeAll(
   approvalRoutes,
-  HttpRouter.add("POST", "/api/device/code", (request) => Effect.gen(function* () {
+
+  HttpRouter.add("POST", "/api/device/code", Effect.fn("createDeviceCode")(function* () {
     const env = yield* WorkerEnv;
-
-    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
-    if (!body || typeof body !== "object" || !("client" in body) ||
-      !isDeviceClient(body.client)) {
-      return HttpServerResponse.jsonUnsafe({ error: "Invalid client." }, { status: 400, headers: noStore });
-    }
-
-    const client = body.client;
-    const db = drizzle(env.DB);
+    const { client } = yield* decodeBody(CodeRequest, "Invalid client.", noStore);
     const now = Date.now();
     const deviceCode = randomBytes(32).toString("hex");
     const userCode = randomBytes(8).toString("hex").toUpperCase().match(/.{4}/g)!.join("-");
     const expiresAt = new Date(now + requestLifetimeMs);
 
-    yield* Effect.promise(() => db.batch([
+    yield* query((db) => db.batch([
       db.delete(deviceAuthorization).where(lt(deviceAuthorization.expiresAt, new Date(now))),
       db.insert(deviceAuthorization).values({
         deviceCodeHash: createHash("sha256").update(deviceCode).digest("hex"),
@@ -111,7 +108,6 @@ export const deviceAuthRoutes = Layer.mergeAll(
 
     const verificationURL = new URL(`/connect/${client}`, env.BETTER_AUTH_URL);
     verificationURL.searchParams.set("code", userCode);
-
     return HttpServerResponse.jsonUnsafe({
       deviceCode,
       userCode,
@@ -121,20 +117,12 @@ export const deviceAuthRoutes = Layer.mergeAll(
     }, { headers: noStore });
   })),
 
-  HttpRouter.add("POST", "/api/device/token", (request) => Effect.gen(function* () {
-    const env = yield* WorkerEnv;
-
-    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
-    if (!body || typeof body !== "object" || !("deviceCode" in body) ||
-      typeof body.deviceCode !== "string" || !/^[a-f0-9]{64}$/.test(body.deviceCode)) {
-      return HttpServerResponse.jsonUnsafe({ error: "invalid_grant" }, { status: 400, headers: noStore });
-    }
-
-    const hash = createHash("sha256").update(body.deviceCode).digest("hex");
+  HttpRouter.add("POST", "/api/device/token", Effect.fn("redeemDeviceCode")(function* () {
+    const { deviceCode } = yield* decodeBody(TokenRequest, "invalid_grant", noStore);
+    const hash = createHash("sha256").update(deviceCode).digest("hex");
     const now = Date.now();
 
-    const db = drizzle(env.DB);
-    const [attempt] = yield* Effect.promise(() => db.update(deviceAuthorization)
+    const [attempt] = yield* query((db) => db.update(deviceAuthorization)
       .set({ nextPollAt: new Date(now + pollIntervalSeconds * 1000) })
       .where(and(
         eq(deviceAuthorization.deviceCodeHash, hash),
@@ -144,27 +132,17 @@ export const deviceAuthRoutes = Layer.mergeAll(
       .returning({ status: deviceAuthorization.status, client: deviceAuthorization.client }));
 
     if (!attempt) {
-      const [existing] = yield* Effect.promise(() => db.select({ expiresAt: deviceAuthorization.expiresAt })
+      const [existing] = yield* query((db) => db.select({ expiresAt: deviceAuthorization.expiresAt })
         .from(deviceAuthorization).where(eq(deviceAuthorization.deviceCodeHash, hash)).limit(1));
-      const error = existing && existing.expiresAt.getTime() > now ? "slow_down" : "expired_token";
-      return HttpServerResponse.jsonUnsafe({ error }, { status: 400, headers: noStore });
+      return yield* oauthError(existing && existing.expiresAt.getTime() > now ? "slow_down" : "expired_token");
     }
-
     if (attempt.status !== "approved") {
-      const error = attempt.status === "denied" ? "access_denied" : "authorization_pending";
-      return HttpServerResponse.jsonUnsafe({ error }, { status: 400, headers: noStore });
+      return yield* oauthError(attempt.status === "denied" ? "access_denied" : "authorization_pending");
     }
 
-    const token = yield* Effect.promise(() => createDeviceApiKey({
-      db,
-      deviceCodeHash: hash,
-      name: deviceClients[attempt.client],
-    }));
-
-    if (!token) {
-      return HttpServerResponse.jsonUnsafe({ error: "invalid_grant" }, { status: 400, headers: noStore });
-    }
-
+    const db = yield* Db;
+    const token = yield* query(() => createDeviceApiKey({ db, deviceCodeHash: hash, name: deviceClients[attempt.client] }));
+    if (!token) return yield* oauthError("invalid_grant");
     return HttpServerResponse.jsonUnsafe({ token }, { headers: noStore });
   })),
 );

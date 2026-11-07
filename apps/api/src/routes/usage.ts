@@ -1,13 +1,13 @@
 import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Effect, Layer } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Effect, Layer, Schema } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 import type { UsageSnapshot } from "../do/user-usage";
 import { usageLimit, usageLog } from "../db/schema";
-import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
-import { calendarDay, localDayStart, parseUtcOffsetMinutes } from "../util/timezone";
+import { ApiError, decodeQuery } from "../http";
 import { UserSession, userAuth } from "../middleware/user-auth";
-import { WorkerEnv } from "../worker-env";
+import { query, UsageCoordinator } from "../services";
+import { calendarDay, localDayStart, parseUtcOffsetMinutes } from "../util/timezone";
+import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
 
 export type UsageLogRow = Pick<
   typeof usageLog.$inferSelect,
@@ -48,34 +48,43 @@ export interface UsageSessionFeed {
   hasMore: boolean;
 }
 
-async function effectiveLimits(db: ReturnType<typeof drizzle>, userId: string): Promise<UsageLimits> {
-  const [row] = await db
-    .select({ fiveHourMicro: usageLimit.fiveHourMicro, weeklyMicro: usageLimit.weeklyMicro })
-    .from(usageLimit)
-    .where(eq(usageLimit.userId, userId))
-    .limit(1);
-  return {
+const effectiveLimits = (userId: string) => query((db) => db
+  .select({ fiveHourMicro: usageLimit.fiveHourMicro, weeklyMicro: usageLimit.weeklyMicro })
+  .from(usageLimit)
+  .where(eq(usageLimit.userId, userId))
+  .limit(1)).pipe(Effect.map(([row]): UsageLimits => ({
     fiveHourMicro: row?.fiveHourMicro ?? DEFAULT_FIVE_HOUR_LIMIT_MICRO,
     weeklyMicro: row?.weeklyMicro ?? DEFAULT_WEEKLY_LIMIT_MICRO,
-  };
-}
+  })));
+
+// Paging is lenient: unparseable numbers fall back to the default.
+const OptionalString = Schema.optional(Schema.String);
+const toInt = (raw: string | undefined, fallback: number) => {
+  const value = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const MeQuery = Schema.Struct({ tzOffset: Schema.optional(Schema.String) });
+const SessionsQuery = Schema.Struct({ page: OptionalString, model: Schema.optional(Schema.String) });
+const LogsQuery = Schema.Struct({
+  limit: OptionalString,
+  offset: OptionalString,
+  session: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
 
 export const usageRoutes = Layer.mergeAll(
   // Public allowance percentages and recorded token usage. Dollar limits stay internal.
-  HttpRouter.add("GET", "/api/usage/me", Effect.gen(function* () {
-    const env = yield* WorkerEnv;
+  HttpRouter.add("GET", "/api/usage/me", Effect.fn("myUsage")(function* () {
     const session = yield* UserSession;
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const offsetMinutes = parseUtcOffsetMinutes(new URL(request.url, env.BETTER_AUTH_URL).searchParams.get("tzOffset"));
-    const db = drizzle(env.DB);
+    const usage = yield* UsageCoordinator;
+    const { tzOffset } = yield* decodeQuery(MeQuery);
+    const offsetMinutes = parseUtcOffsetMinutes(tzOffset ?? null);
 
-    const limits = yield* Effect.promise(() => effectiveLimits(db, session.user.id));
-    const windows = yield* Effect.tryPromise(() => env.USER_USAGE.getByName(session.user.id).status(limits)).pipe(
-      Effect.orElseSucceed(() => null),
+    const limits = yield* effectiveLimits(session.user.id);
+    const windows = yield* usage.status(session.user.id, limits).pipe(
+      Effect.mapError(() => new ApiError({ status: 503, message: "Unable to load usage right now." })),
     );
-    if (!windows) {
-      return HttpServerResponse.jsonUnsafe({ error: "Unable to load usage right now." }, { status: 503 });
-    }
 
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
@@ -83,7 +92,7 @@ export const usageRoutes = Layer.mergeAll(
     // prompt_tokens already includes cached input. Count those tokens once.
     const totalTokens = sql`COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)`;
     const userFilter = eq(usageLog.userId, session.user.id);
-    const [totals, history, perModel] = yield* Effect.promise(() => Promise.all([
+    const [totals, history, perModel] = yield* query((db) => Promise.all([
       db.select({
         lifetime: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
         last24Hours: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
@@ -121,17 +130,13 @@ export const usageRoutes = Layer.mergeAll(
     } satisfies UsageStatus);
   })),
 
-  HttpRouter.add("GET", "/api/usage/sessions", Effect.gen(function* () {
-    const env = yield* WorkerEnv;
+  HttpRouter.add("GET", "/api/usage/sessions", Effect.fn("usageSessions")(function* () {
     const session = yield* UserSession;
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const url = new URL(request.url, env.BETTER_AUTH_URL);
-    const page = Math.max(0, Number.parseInt(url.searchParams.get("page") ?? "0", 10) || 0);
-    const model = url.searchParams.get("model");
+    const params = yield* decodeQuery(SessionsQuery);
+    const page = Math.max(0, toInt(params.page, 0));
     const filters = [eq(usageLog.userId, session.user.id)];
-    if (model) filters.push(eq(usageLog.model, model));
-    const db = drizzle(env.DB);
-    const sessions = yield* Effect.promise(() => db.select({
+    if (params.model) filters.push(eq(usageLog.model, params.model));
+    const sessions = yield* query((db) => db.select({
       id: sql<string>`COALESCE(${usageLog.sessionId}, ${usageLog.id})`,
       sessionId: usageLog.sessionId,
       requests: sql<number>`COUNT(*)`,
@@ -155,24 +160,18 @@ export const usageRoutes = Layer.mergeAll(
 
   // Recent request history for the logs page. Optional session and model
   // filters narrow the feed.
-  HttpRouter.add("GET", "/api/usage/logs", Effect.gen(function* () {
-    const env = yield* WorkerEnv;
+  HttpRouter.add("GET", "/api/usage/logs", Effect.fn("usageLogs")(function* () {
     const session = yield* UserSession;
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const db = drizzle(env.DB);
-
-    const url = new URL(request.url, env.BETTER_AUTH_URL);
-    const parsedLimit = Number.parseInt(url.searchParams.get("limit") ?? "100", 10);
-    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 100;
-    const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0);
-    const sessionId = url.searchParams.get("session");
-    const model = url.searchParams.get("model");
+    const params = yield* decodeQuery(LogsQuery);
+    const limit = Math.min(Math.max(toInt(params.limit, 100), 1), 500);
+    const offset = Math.max(0, toInt(params.offset, 0));
+    const { session: sessionId, model } = params;
 
     const filters = [eq(usageLog.userId, session.user.id)];
     if (sessionId) filters.push(or(eq(usageLog.sessionId, sessionId), and(isNull(usageLog.sessionId), eq(usageLog.id, sessionId)))!);
     if (model) filters.push(eq(usageLog.model, model));
 
-    const logs = yield* Effect.promise(() => db
+    const logs = yield* query((db) => db
       .select({
         id: usageLog.id,
         sessionId: usageLog.sessionId,
@@ -191,8 +190,7 @@ export const usageRoutes = Layer.mergeAll(
       .from(usageLog)
       .where(and(...filters))
       .orderBy(desc(usageLog.createdAt), desc(usageLog.id))
-      .limit(limit + 1).offset(offset),
-    );
+      .limit(limit + 1).offset(offset));
 
     return HttpServerResponse.jsonUnsafe({ logs: logs.slice(0, limit), nextOffset: logs.length > limit ? offset + limit : null } satisfies UsageLogFeed);
   })),

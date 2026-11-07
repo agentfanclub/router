@@ -1,15 +1,14 @@
 import { env } from "cloudflare:workers";
 import { Context, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { createAuth } from "./auth";
+import { adminRoutes } from "./routes/admin";
 import { apiKeyRoutes } from "./routes/api-keys";
 import { byokRoutes } from "./routes/byok";
 import { deviceAuthRoutes } from "./routes/device-auth";
 import { inferenceRoutes } from "./routes/inference";
 import { modelRoutes } from "./routes/models";
-import { adminRoutes } from "./routes/admin";
 import { usageRoutes } from "./routes/usage";
-import { WorkerEnv, WorkerExecution } from "./worker-env";
+import { Auth, servicesLayer, WorkerExecution } from "./services";
 
 export { UserUsage } from "./do/user-usage";
 
@@ -22,19 +21,17 @@ const routes = Layer.mergeAll(
   adminRoutes,
   usageRoutes,
   HttpRouter.add("*", "/health", HttpServerResponse.text("OK")),
-  HttpRouter.add("*", "/api/auth/*", (request) =>
-    Effect.gen(function* () {
-      const env = yield* WorkerEnv;
-      const webRequest = yield* HttpServerRequest.toWeb(request);
-      const response = yield* Effect.promise(() => createAuth(env).handler(webRequest));
-      return HttpServerResponse.fromWeb(response);
-    }),
-  ),
+  HttpRouter.add("*", "/api/auth/*", Effect.fn("auth")(function* (request) {
+    const auth = yield* Auth;
+    const webRequest = yield* HttpServerRequest.toWeb(request);
+    const response = yield* Effect.promise(() => auth.handler(webRequest));
+    return HttpServerResponse.fromWeb(response);
+  })),
 );
 
 const app = HttpRouter.toWebHandler(routes.pipe(
   Layer.provide(HttpServer.layerServices),
-  Layer.provideMerge(Layer.succeed(WorkerEnv, env)),
+  Layer.provideMerge(servicesLayer(env)),
 ));
 
 export default {

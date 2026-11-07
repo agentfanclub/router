@@ -70,18 +70,12 @@ export const usageRoutes = Layer.mergeAll(
     const db = drizzle(env.DB);
 
     const limits = yield* Effect.promise(() => effectiveLimits(db, session.user.id));
-    const stub = env.USER_USAGE.get(env.USER_USAGE.idFromName(session.user.id));
-    const snapshot = yield* Effect.tryPromise(() => stub.fetch("https://usage/status", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ limits, userId: session.user.id }),
-    })).pipe(
+    const windows = yield* Effect.tryPromise(() => env.USER_USAGE.getByName(session.user.id).status(limits)).pipe(
       Effect.orElseSucceed(() => null),
     );
-    if (!snapshot || !snapshot.ok) {
+    if (!windows) {
       return HttpServerResponse.jsonUnsafe({ error: "Unable to load usage right now." }, { status: 503 });
     }
-    const windows = yield* Effect.promise(() => snapshot.json<UsageSnapshot>());
 
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;

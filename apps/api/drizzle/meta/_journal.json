@@ -64,6 +64,13 @@
       "when": 1792640363666,
       "tag": "0008_prefix_router_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792640423666,
+      "tag": "0009_rename_lumen_upstream",
+      "breakpoints": true
     }
   ]
 }

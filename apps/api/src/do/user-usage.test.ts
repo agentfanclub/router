@@ -1,121 +1,128 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
-import { UserUsage } from "./user-usage";
+import { describe, expect, mock, test } from "bun:test";
+import type { UpstreamRoute } from "../upstreams";
 
-// Runs the Durable Object against in-memory SQLite. D1 is only used to mirror
-// settled usage logs, which these admission tests do not exercise.
+mock.module("cloudflare:workers", () => ({
+  DurableObject: class {
+    constructor(readonly ctx: unknown, readonly env: unknown) { }
+  },
+}));
+const { UserUsage } = await import("./user-usage");
+
+// Runs the Durable Object against in-memory SQLite. D1 is only a mirror of the
+// journal, so writes to it are accepted and dropped.
 function makeInstance() {
   const db = new Database(":memory:");
-  db.exec("CREATE TABLE IF NOT EXISTS windows (name TEXT PRIMARY KEY, start_ms INTEGER NOT NULL, used_micro INTEGER NOT NULL)");
-  db.exec("BEGIN");
-  db.exec("INSERT OR IGNORE INTO windows (name, start_ms, used_micro) VALUES ('five_hour', ?, 0), ('weekly', ?, 0)", [Date.now(), Date.now()]);
-  db.exec("COMMIT");
-  const d1 = {
-    prepare: () => {
-      throw new Error("D1 not available");
-    },
-  };
   const storage = {
     sql: {
       exec: (query: string, ...params: unknown[]) => ({
         toArray: () => db.query(query).all(...(params as never[])),
       }),
     },
-    get: async () => true,
-    put: async () => {},
-    setAlarm: async () => {},
+    setAlarm: async () => { },
     getAlarm: async () => null,
-    deleteAlarm: async () => {},
-    transactionSync: (fn: () => void) => {
-      db.exec("BEGIN");
-      try {
-        fn();
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-    },
+    transactionSync: (fn: () => void) => db.transaction(fn)(),
   };
-  const state = {
-    storage,
-    blockConcurrencyWhile: async (fn: () => Promise<void>) => { await fn(); },
-  } as unknown as DurableObjectState;
-  return new UserUsage(state, { DB: d1 } as never);
+  const statement = { bind: () => statement, run: async () => ({ success: true, results: [] }) };
+  const d1 = { prepare: () => statement };
+  return new UserUsage({ storage } as unknown as DurableObjectState, { DB: d1 } as never);
 }
 
-// Two different prices so the reserved amount reveals which route was chosen.
-const LUMEN = { input: 1, output: 1, cacheRead: 1 };
-const SARVAM = { input: 0.15, output: 0.6, cacheRead: 0.05 };
+const LIMITS = { fiveHourMicro: 10_000_000, weeklyMicro: 50_000_000 };
 
-function admit(
-  usage: UserUsage,
-  overrides: {
-    upstreams?: Partial<{ clubLumen: "ok" | "dry"; byok: boolean; opencodeGo: boolean; sarvam: boolean }>;
-    sarvamPriced?: boolean;
-    limits?: { fiveHourMicro: number; weeklyMicro: number };
-  } = {},
-) {
-  return usage.fetch(new Request("https://usage/admit", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      requestId: crypto.randomUUID(),
-      sessionId: `ses_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      userId: "test-user",
-      apiKeyId: "test-key",
-      model: "sarvam-105b",
-      createdAt: Date.now(),
-      inputEstimateTokens: 20,
-      maxOutputTokens: 16384,
-      limits: overrides.limits ?? { fiveHourMicro: 10_000_000, weeklyMicro: 50_000_000 },
-      upstreams: { clubLumen: "dry", byok: false, opencodeGo: false, sarvam: true, ...overrides.upstreams },
-      sarvamPriced: overrides.sarvamPriced ?? true,
-      prices: { clubLumen: LUMEN, sarvam: overrides.sarvamPriced === false ? undefined : SARVAM },
-    }),
+function admit(usage: InstanceType<typeof UserUsage>, overrides: {
+  routes?: UpstreamRoute[];
+  reserveMicro?: number;
+  sessionId?: string;
+  requestId?: string;
+} = {}) {
+  return usage.admit({
+    requestId: overrides.requestId ?? crypto.randomUUID(),
+    sessionId: overrides.sessionId ?? `ses_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+    userId: "test-user",
+    apiKeyId: "test-key",
+    model: "test-model",
+    createdAt: Date.now(),
+    routes: overrides.routes ?? ["lumen"],
+    reserveMicro: overrides.reserveMicro ?? 1_000,
+    limits: LIMITS,
+  });
+}
+
+function spend(usage: InstanceType<typeof UserUsage>, costMicro: number) {
+  const requestId = crypto.randomUUID();
+  return admit(usage, { requestId }).then(() => usage.settle({
+    requestId,
+    route: "lumen",
+    usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 },
+    costMicro,
+    status: "ok",
+    durationMs: 1,
+    limits: LIMITS,
   }));
 }
 
 describe("admission", () => {
-  test("the Sarvam model reserves at the Sarvam price", async () => {
-    const decision = await (await admit(makeInstance())).json();
-    expect(decision).toMatchObject({ decision: "admit" });
-    // 20 * 0.15 + 16384 * 0.6 = 9,833 at Sarvam, versus 16,404 at Lumen's
-    // price, so the reservation reveals which route was chosen.
-    expect(decision.reservedMicro).toBe(9_833);
+  test("admits on the first route and reserves its cost", async () => {
+    const usage = makeInstance();
+    const decision = await admit(usage, { routes: ["sarvam", "lumen"], reserveMicro: 5_000 });
+    expect(decision).toMatchObject({ decision: "admit", route: "sarvam" });
+    expect((await usage.status(LIMITS)).pendingMicro).toBe(5_000);
   });
 
-  test("without a Sarvam key the model reserves at the Lumen price", async () => {
-    const decision = await (await admit(makeInstance(), { upstreams: { clubLumen: "ok", sarvam: false }, sarvamPriced: false })).json();
-    expect(decision).toMatchObject({ decision: "admit" });
-    expect(decision.reservedMicro).toBe(16_404);
+  test("admits a request whose reservation exceeds the remaining allowance", async () => {
+    const usage = makeInstance();
+    await spend(usage, 9_999_000);
+    const decision = await admit(usage, { reserveMicro: 2_000_000 });
+    expect(decision).toMatchObject({ decision: "admit", route: "lumen" });
   });
 
-  test("a Sarvam model without a Sarvam price is rejected, never Lumen-priced", async () => {
-    const instance = makeInstance();
-    const response = await instance.fetch(new Request("https://usage/admit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        requestId: crypto.randomUUID(),
-        sessionId: `ses_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-        userId: "test-user",
-        apiKeyId: "test-key",
-        model: "sarvam-105b",
-        createdAt: Date.now(),
-        inputEstimateTokens: 20,
-        maxOutputTokens: 16384,
-        limits: { fiveHourMicro: 10_000_000, weeklyMicro: 50_000_000 },
-        upstreams: { clubLumen: "ok", byok: false, opencodeGo: false, sarvam: true },
-        sarvamPriced: true,
-        prices: { clubLumen: LUMEN },
-      }),
-    }));
-    expect(response.status).toBe(400);
+  test("denies once spend reaches the limit", async () => {
+    const usage = makeInstance();
+    await spend(usage, 10_000_000);
+    expect(await admit(usage)).toMatchObject({ decision: "deny", reason: "five_hour_cap" });
   });
 
-  test("no upstream at all still denies", async () => {
-    const decision = await (await admit(makeInstance(), { upstreams: { sarvam: false } })).json();
-    expect(decision).toMatchObject({ decision: "deny", reason: "no_upstream" });
+  test("in-flight reservations count toward the limit", async () => {
+    const usage = makeInstance();
+    await spend(usage, 9_000_000);
+    expect(await admit(usage, { reserveMicro: 1_000_000 })).toMatchObject({ decision: "admit" });
+    expect(await admit(usage)).toMatchObject({ decision: "deny", reason: "five_hour_cap" });
+  });
+
+  test("over the limit, the user's own key serves without a reservation", async () => {
+    const usage = makeInstance();
+    await spend(usage, 10_000_000);
+    expect(await admit(usage, { routes: ["lumen", "byok"] })).toMatchObject({ decision: "admit", route: "byok" });
+    expect((await usage.status(LIMITS)).pendingMicro).toBe(0);
+  });
+
+  test("a session stays on its route while that route is available", async () => {
+    const usage = makeInstance();
+    const sessionId = "ses_0123456789abcdef";
+    await admit(usage, { sessionId, routes: ["sarvam"] });
+    expect(await admit(usage, { sessionId, routes: ["lumen", "sarvam"] })).toMatchObject({ route: "sarvam" });
+    expect(await admit(usage, { sessionId, routes: ["lumen"] })).toMatchObject({ route: "lumen" });
+  });
+});
+
+describe("settlement", () => {
+  test("charges actual cost and releases the reservation", async () => {
+    const usage = makeInstance();
+    const snapshot = await spend(usage, 1_234);
+    expect(snapshot.fiveHour.usedMicro).toBe(1_234);
+    expect(snapshot.weekly.usedMicro).toBe(1_234);
+    expect(snapshot.pendingMicro).toBe(0);
+  });
+
+  test("usage on the user's own key is not charged", async () => {
+    const usage = makeInstance();
+    const requestId = crypto.randomUUID();
+    await admit(usage, { requestId, routes: ["byok"] });
+    const snapshot = await usage.settle({
+      requestId, route: "byok", usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 },
+      costMicro: 5_000, status: "ok", durationMs: 1, limits: LIMITS,
+    });
+    expect(snapshot.fiveHour.usedMicro).toBe(0);
   });
 });

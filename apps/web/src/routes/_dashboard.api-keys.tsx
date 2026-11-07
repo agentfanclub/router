@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from "../lib/api-keys";
 import { Button } from "../components/button";
 import { PersonalLumenKeys } from "../components/personal-lumen-keys";
+import { DataTable, TableBody, TableHead, Td, Th } from "../components/data-table";
 import { listByokKeys } from "../lib/byok";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 
@@ -157,46 +158,55 @@ function Page() {
 
       {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
 
-      <div className="dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]">
-        <table className="dashboard-table api-keys-table w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
-          <caption className="sr-only">API keys with their name, masked token, creation date, and enabled status.</caption>
-          <thead>
-            <tr className="text-sm text-neutral-500">
-              <th scope="col" className="px-6 py-2.5 font-medium">Name</th>
-              <th scope="col" className="px-5 py-2.5 font-medium">Token</th>
-              <th scope="col" className="px-5 py-2.5 font-medium">Created at</th>
-              <th scope="col" className="px-3 py-2.5 text-right font-medium">Enabled</th>
-              <th scope="col"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody className="bg-white" data-single-row={keys.length === 1}>
-            {keys.map((key) => (
-              <tr key={key.id} className={key.enabled ? undefined : "[&>td:nth-child(-n+3)]:opacity-50"}>
-                <td className="flex h-10 min-w-0 items-center px-6">
-                  <span className="block truncate" title={key.name}>{key.name}</span>
-                </td>
-                <td className="flex h-10 items-center px-5">
-                  <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-500">{`sk-afcrouter-••••••••••••${key.lastFive}`}</code>
-                </td>
-                <td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500">
-                  <time dateTime={key.createdAt}>{dateFormatter.format(new Date(key.createdAt))}</time>
-                </td>
-                <td className="flex h-10 items-center justify-end px-3">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={key.enabled}
-                    aria-label={`Enable ${key.name}`}
-                    disabled={pendingIds.includes(key.id)}
-                    onClick={() => void changeKey(key.id, !key.enabled)}
-                    className={`inline-flex h-6 w-11 cursor-pointer items-center rounded-full border p-[3px] align-middle shadow-inner transition-colors motion-reduce:transition-none ${key.enabled ? "border-green-600 bg-green-600 hover:bg-green-700" : "border-neutral-300 bg-neutral-200 hover:bg-neutral-300"}`}
-                  >
-                    <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0_/_20%)] transition-transform motion-reduce:transition-none ${key.enabled ? "translate-x-5" : "translate-x-0"}`}>
-                      {key.enabled && <Check size={10} strokeWidth={3} className="text-green-600" />}
-                    </span>
-                  </button>
-                </td>
-                <td className="flex h-10 items-center justify-end pl-1 pr-3">
+      <DataTable variant="api-keys" minWidth={760} caption="API keys with their name, masked token, creation date, and enabled status.">
+        <TableHead>
+          <Th pad="start" className="px-6 font-normal">Name</Th>
+          <Th className="px-5 font-normal">Token</Th>
+          <Th className="px-5 font-normal">Created at</Th>
+          <Th align="right" className="font-normal">Enabled</Th>
+          <Th><span className="sr-only">Actions</span></Th>
+        </TableHead>
+        <TableBody
+          rows={keys}
+          rowKey={(key) => key.id}
+          columns={5}
+          rowClassName={(key) => key.enabled ? undefined : "[&>td:nth-child(-n+3)]:opacity-50"}
+          empty={
+            <>
+              <p className="mb-4">No API keys yet.</p>
+              <Button onClick={() => setCreating(true)}>
+                <Plus size={13} aria-hidden="true" />
+                Create new API Key
+              </Button>
+            </>
+          }
+          renderRow={(key) => (
+            <>
+              <Td pad="start" className="flex h-10 min-w-0 items-center px-6">
+                <span className="block truncate" title={key.name}>{key.name}</span>
+              </Td>
+              <Td className="flex h-10 min-w-0 items-center px-5">
+                <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-500">{`sk-afcrouter-••••••••••••${key.lastFive}`}</code>
+              </Td>
+              <Td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500">
+                <time dateTime={key.createdAt}>{dateFormatter.format(new Date(key.createdAt))}</time>
+              </Td>
+              <Td align="right" className="flex h-10 items-center justify-end">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={key.enabled}
+                  aria-label={`Enable ${key.name}`}
+                  disabled={pendingIds.includes(key.id)}
+                  onClick={() => void changeKey(key.id, !key.enabled)}
+                  className={`inline-flex h-6 w-11 cursor-pointer items-center rounded-full border p-[3px] align-middle shadow-inner transition-colors motion-reduce:transition-none ${key.enabled ? "border-green-600 bg-green-600 hover:bg-green-700" : "border-neutral-300 bg-neutral-200 hover:bg-neutral-300"}`}
+                >
+                  <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0_/_20%)] transition-transform motion-reduce:transition-none ${key.enabled ? "translate-x-5" : "translate-x-0"}`}>
+                    {key.enabled && <Check size={10} strokeWidth={3} className="text-green-600" />}
+                  </span>
+                </button>
+              </Td>
+              <Td align="right" pad="end" className="flex h-10 items-center justify-end pl-1 pr-3">
                   <Dialog open={deletingId === key.id} onOpenChange={(open) => {
                     if (pendingIds.includes(key.id)) return;
                     setDeletingId(open ? key.id : null);
@@ -225,23 +235,11 @@ function Page() {
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
-                </td>
-              </tr>
-            ))}
-            {keys.length === 0 && (
-              <tr>
-                <td colSpan={5} className="col-span-full px-6 py-8 text-center text-neutral-500">
-                  <p className="mb-4">No API keys yet.</p>
-                  <Button onClick={() => setCreating(true)}>
-                    <Plus size={13} aria-hidden="true" />
-                    Create new API Key
-                  </Button>
-                </td>
-              </tr>
+                </Td>
+              </>
             )}
-          </tbody>
-        </table>
-      </div>
+          />
+        </DataTable>
       <PersonalLumenKeys initialKeys={initial.personalKeys.keys} loadError={initial.personalKeys.error} />
     </section>
   );

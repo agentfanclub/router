@@ -75,6 +75,31 @@
       ]
     }
   },
+  "sarvam-105b": {
+    "id": "sarvam-105b",
+    "name": "Sarvam 105B",
+    "attachment": false,
+    "reasoning": true,
+    "tool_call": true,
+    "limit": {
+      "context": 131072,
+      "output": 16384
+    },
+    "cost": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_read": 0.05,
+      "cache_write": 0
+    },
+    "modalities": {
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ]
+    }
+  },
   "qwen3.8-flash": {
     "id": "qwen3.8-flash",
     "name": "Qwen3.8 Flash",

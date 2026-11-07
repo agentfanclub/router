@@ -20,6 +20,15 @@ import { WorkerEnv, WorkerExecution } from "../worker-env";
 
 const LUMEN_CHAT_URL = "https://lumen.ncsa.illinois.edu/v1/chat/completions";
 
+// Sarvam is Bearer-authenticated and OpenAI-compatible for chat, streaming, and
+// usage reporting, but it thinks unless told how hard, and reasoning tokens
+// count as output, so the router always sets an explicit effort. Its
+// max_tokens ceiling depends on the Sarvam plan; the catalog's lowest plan
+// bound keeps a large client request from failing outright.
+const SARVAM_CHAT_URL = "https://api.sarvam.ai/v1/chat/completions";
+const SARVAM_MAX_OUTPUT_TOKENS = 4096;
+const SARVAM_REASONING_EFFORT = "medium";
+
 type CatalogModel = (typeof models)[keyof typeof models];
 const catalog = models as unknown as Record<string, CatalogModel>;
 
@@ -99,9 +108,20 @@ const handleRequest = Effect.gen(function* () {
 
   const price = modelPrice(entry);
   const requestedMaxOutput = body.max_tokens ?? body.max_completion_tokens;
-  const maxOutputTokens = requestedMaxOutput && requestedMaxOutput > 0
-    ? Math.min(requestedMaxOutput, entry.limit.output)
+  // A model is served by exactly one club API: Sarvam-served models only exist
+  // on Sarvam's API, and every other catalog model is on Lumen. An unset key
+  // makes that upstream unavailable, which admission has already accounted for.
+  const isSarvamModel = body.model.startsWith("sarvam-");
+  const clubCredential = isSarvamModel ? env.SARVAM_API_KEY ?? null : env.LUMEN_API_KEY ?? null;
+
+  // Sarvam enforces its output ceiling by plan, so requests are bounded to the
+  // lowest plan's limit. The reservation trusts the bound the upstream honors.
+  const outputLimit = isSarvamModel
+    ? Math.min(entry.limit.output, SARVAM_MAX_OUTPUT_TOKENS)
     : entry.limit.output;
+  const maxOutputTokens = requestedMaxOutput && requestedMaxOutput > 0
+    ? Math.min(requestedMaxOutput, outputLimit)
+    : outputLimit;
   const inputEstimateTokens = Math.ceil(rawBody.length / 4);
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -129,8 +149,11 @@ const handleRequest = Effect.gen(function* () {
         clubLumen: env.LUMEN_API_KEY ? "ok" : "dry",
         byok: byokAvailable,
         opencodeGo: false,
+        sarvam: Boolean(env.SARVAM_API_KEY),
       },
-      prices: { clubLumen: price },
+      // Sarvam prices its models itself; Lumen prices the rest.
+      sarvamPriced: isSarvamModel,
+      prices: { clubLumen: price, sarvam: isSarvamModel ? price : undefined },
     }),
   })).pipe(
     Effect.orElseSucceed(() => null),
@@ -205,9 +228,24 @@ const handleRequest = Effect.gen(function* () {
   // so real token counts back the cost accounting. The injected final usage
   // chunk is hidden from clients that did not request it.
   const clientWantsUsage = body.stream_options?.include_usage === true;
-  const upstreamBodyText = body.stream && !clientWantsUsage
-    ? JSON.stringify({ ...JSON.parse(rawBody), stream_options: { include_usage: true } })
-    : rawBody;
+  const injectUsage = (raw: string) => JSON.stringify({ ...JSON.parse(raw), stream_options: { include_usage: true } });
+  const upstreamBodyText = body.stream && !clientWantsUsage ? injectUsage(rawBody) : rawBody;
+
+  // Sarvam gets the router's reasoning effort and a plan-safe output bound,
+  // leaving a client's own effort as-is. Streams always ask for usage: the
+  // effective bound has to be fixed before admission, and Sarvam's usage chunk
+  // is what prices the request.
+  const sarvamBodyText = (() => {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    delete parsed.max_completion_tokens;
+    if (body.stream && !clientWantsUsage) parsed.stream_options = { include_usage: true };
+    const maxTokens = parsed.max_tokens ?? body.max_completion_tokens;
+    if (typeof maxTokens === "number" && maxTokens > SARVAM_MAX_OUTPUT_TOKENS) {
+      parsed.max_tokens = SARVAM_MAX_OUTPUT_TOKENS;
+    }
+    if (parsed.reasoning_effort === undefined) parsed.reasoning_effort = SARVAM_REASONING_EFFORT;
+    return JSON.stringify(parsed);
+  })();
 
   let attempt = 0;
   const sendUpstream = async (credential: string, attemptRoute: UpstreamRoute) => {
@@ -216,7 +254,7 @@ const handleRequest = Effect.gen(function* () {
     const attemptContext = { ...logContext, route: attemptRoute, attempt: attemptNumber };
     console.info({ event: "upstream_started", ...attemptContext });
     try {
-      const response = await fetch(LUMEN_CHAT_URL, {
+      const response = await fetch(isSarvamModel ? SARVAM_CHAT_URL : LUMEN_CHAT_URL, {
         method: "POST",
         headers: {
           authorization: `Bearer ${credential}`,
@@ -224,7 +262,7 @@ const handleRequest = Effect.gen(function* () {
           accept: request.headers.accept ?? "application/json",
           "x-opencode-session": sessionId,
         },
-        body: upstreamBodyText,
+        body: isSarvamModel ? sarvamBodyText : upstreamBodyText,
         signal: webRequest.signal,
         redirect: "manual",
       });
@@ -252,8 +290,9 @@ const handleRequest = Effect.gen(function* () {
     : Promise.resolve(null);
 
   // Choose the starting credential from the admitted route. The coordinator
-  // never routes club-lumen without a club key or byok without a stored key.
-  let credential: string | null = route === "byok" ? null : env.LUMEN_API_KEY ?? null;
+  // never routes to a club upstream whose key is unset or to byok without a
+  // stored key.
+  let credential: string | null = route === "byok" ? null : clubCredential;
   if (route === "byok") {
     credential = yield* Effect.promise(personalCredential);
     if (!credential) {
@@ -275,14 +314,17 @@ const handleRequest = Effect.gen(function* () {
     if (aborted) {
       return HttpServerResponse.fromWeb(new Response(null, { status: 499, headers: { "x-router-request-id": requestId } }));
     }
-    return chatError("Unable to reach Lumen.", "upstream_unreachable", 502, requestId);
+    console.error({ event: "upstream_unreachable", ...logContext, route });
+    return chatError(`Unable to reach ${isSarvamModel ? "Sarvam" : "Lumen"}.`, "upstream_unreachable", 502, requestId);
   }
 
   // Seamless failover: the club account cannot serve (auth, payment, or
   // quota) while the user has a personal key — retry there immediately.
   // The client never sees the first failure, and the club reservation is
   // released without charge when the request settles on the personal key.
-  if (route === "club-lumen" && byokAvailable && [401, 402, 429].includes(upstream.status)) {
+  // Sarvam refuses requests the same way: 402 for spent credits, 401 and 429
+  // for keys and limits, so it fails over by the same rule.
+  if (route !== "byok" && byokAvailable && [401, 402, 429].includes(upstream.status)) {
     const secret = yield* Effect.promise(personalCredential);
     if (secret) {
       const first = upstream;
@@ -290,7 +332,7 @@ const handleRequest = Effect.gen(function* () {
         Effect.orElseSucceed(() => null),
       );
       if (retry) {
-        void first.body?.cancel().catch(() => {});
+        void first.body?.cancel().catch(() => { });
         route = "byok";
         upstream = retry;
       }
@@ -311,7 +353,7 @@ const handleRequest = Effect.gen(function* () {
   if (!upstream.ok || !upstream.body) {
     const errorText = yield* Effect.promise(() => upstream.text().catch(() => ""));
     let error: unknown;
-    try { error = (JSON.parse(errorText) as { error?: unknown } | null)?.error; } catch {}
+    try { error = (JSON.parse(errorText) as { error?: unknown } | null)?.error; } catch { }
     console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
     yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
     return HttpServerResponse.fromWeb(new Response(errorText || null, {
@@ -333,7 +375,7 @@ const handleRequest = Effect.gen(function* () {
       const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
       hasError = Boolean(error);
       if (hasError) console.error({ event: "upstream_body_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
-    } catch {}
+    } catch { }
     yield* Effect.promise(() => finalize({ status: hasError ? "error" : "ok", usage, durationMs: Date.now() - startedAt }));
     return HttpServerResponse.fromWeb(new Response(text, {
       status: upstream.status,

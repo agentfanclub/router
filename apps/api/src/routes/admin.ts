@@ -12,6 +12,22 @@ export type User = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "rol
   weeklyMicro: number | null;
 };
 
+export interface TokenLeaderboard {
+  days: number;
+  // Ranked by total tokens, descending.
+  entries: {
+    userId: string;
+    name: string;
+    email: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    requests: number;
+    sessions: number;
+  }[];
+  totals: { totalTokens: number; users: number };
+}
+
 export interface AdminUsage {
   days: number;
   perUser: { userId: string; name: string; email: string; clubMicro: number; personalMicro: number; sessions: number }[];
@@ -113,6 +129,48 @@ export const adminRoutes = Layer.mergeAll(
     ]));
 
     return HttpServerResponse.jsonUnsafe({ days, perUser, perModel, history } satisfies AdminUsage);
+  })),
+
+  // Token leaderboard: lifetime (or windowed) token totals per user, ranked
+  // highest first. A `days` of 7 or 30 narrows the window; anything else means
+  // lifetime. Prompt tokens already include cached input, so they count once.
+  HttpRouter.add("GET", "/api/admin/token-leaderboard", Effect.gen(function* () {
+    const env = yield* WorkerEnv;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const db = drizzle(env.DB);
+
+    const url = new URL(request.url, env.BETTER_AUTH_URL);
+    const range = url.searchParams.get("days");
+    const days = range === "7" ? 7 : range === "30" ? 30 : null;
+    const since = days === null ? null : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const totalTokens = sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`;
+    const entries = yield* Effect.promise(() => db.select({
+      userId: usageLog.userId,
+      name: user.name,
+      email: user.email,
+      inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
+      outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
+      totalTokens,
+      requests: sql<number>`COUNT(*)`,
+      sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
+    })
+      .from(usageLog)
+      .innerJoin(user, eq(user.id, usageLog.userId))
+      .where(since ? gte(usageLog.createdAt, since) : undefined)
+      .groupBy(usageLog.userId, user.name, user.email)
+      .orderBy(desc(totalTokens), asc(user.email))
+      .limit(100),
+    );
+
+    return HttpServerResponse.jsonUnsafe({
+      days: days ?? 0,
+      entries,
+      totals: {
+        totalTokens: entries.reduce((sum, entry) => sum + entry.totalTokens, 0),
+        users: entries.length,
+      },
+    } satisfies TokenLeaderboard);
   })),
 
   // Set per-user cap overrides. Null columns fall back to the defaults.

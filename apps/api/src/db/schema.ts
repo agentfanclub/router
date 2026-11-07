@@ -68,7 +68,7 @@ export const account = sqliteTable("account", {
 // One completed, denied, or failed inference request. The request ID is the
 // primary key so worker retries after a transient D1 error cannot double-log.
 // Costs are integer micro-dollars. Prompt and completion bodies are never stored.
-export const usageUpstreams = ["club-lumen", "byok", "opencode-go"] as const;
+export const usageUpstreams = ["club-lumen", "byok", "opencode-go", "sarvam"] as const;
 export const usageBilled = ["club", "personal"] as const;
 export const usageStatuses = ["pending", "ok", "error", "aborted", "denied"] as const;
 

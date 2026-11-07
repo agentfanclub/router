@@ -8,7 +8,7 @@ import {
   type UsageLimits,
 } from "../util/usage";
 
-export type UpstreamRoute = "club-lumen" | "byok" | "opencode-go";
+export type UpstreamRoute = "club-lumen" | "byok" | "opencode-go" | "sarvam";
 export type DenyReason = "five_hour_cap" | "weekly_cap" | "no_upstream";
 
 export interface WindowSnapshot {
@@ -37,8 +37,11 @@ export interface AdmitInput {
   // Availability snapshot from the worker. Club-level upstream state is an
   // observation, not a reservation: upstreams enforce their own limits, so a
   // stale-by-seconds view only affects routing preference, never correctness.
-  upstreams: { clubLumen: "ok" | "dry"; byok: boolean; opencodeGo: boolean };
-  prices: { clubLumen: RoutePrice; opencodeGo?: RoutePrice };
+  upstreams: { clubLumen: "ok" | "dry"; byok: boolean; opencodeGo: boolean; sarvam: boolean };
+  // Set when the club's Sarvam account serves this model, which is then routed
+  // to Sarvam alone. The model catalog knows which provider owns each model.
+  sarvamPriced?: boolean;
+  prices: { clubLumen: RoutePrice; opencodeGo?: RoutePrice; sarvam?: RoutePrice };
 }
 
 export type AdmitResult =
@@ -114,7 +117,7 @@ export class UserUsage implements DurableObject {
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: ApiEnv,
-  ) {}
+  ) { }
 
   async fetch(request: Request): Promise<Response> {
     // Read the body first: awaiting it can interleave with another request,
@@ -204,8 +207,14 @@ export class UserUsage implements DurableObject {
 
     // Candidate routes in priority order: club Lumen first, then the club's
     // OpenCode Go allocation while allowance remains, then the user's own key.
+    // A model is offered by exactly one club upstream, so only the owner is
+    // considered before the user's own key.
     const candidates: UpstreamRoute[] = [];
-    if (input.upstreams.clubLumen === "ok") candidates.push("club-lumen");
+    if (input.sarvamPriced) {
+      if (input.upstreams.sarvam) candidates.push("sarvam");
+    } else if (input.upstreams.clubLumen === "ok") {
+      candidates.push("club-lumen");
+    }
     if (input.upstreams.opencodeGo && input.prices.opencodeGo) candidates.push("opencode-go");
     if (input.upstreams.byok) candidates.push("byok");
 
@@ -228,7 +237,11 @@ export class UserUsage implements DurableObject {
         return { decision: "admit", route, reservedMicro: 0, snapshot };
       }
 
-      const price = route === "club-lumen" ? input.prices.clubLumen : input.prices.opencodeGo!;
+      const price = route === "club-lumen"
+        ? input.prices.clubLumen
+        : route === "sarvam"
+          ? input.prices.sarvam!
+          : input.prices.opencodeGo!;
       const reservedMicro = estimateCostMicro(input, price);
       const fiveHourFits =
         snapshot.fiveHour.usedMicro + snapshot.pendingMicro + reservedMicro <= input.limits.fiveHourMicro;
@@ -528,6 +541,9 @@ function parseAdmitInput(raw: unknown): AdmitInput | null {
     typeof record.inputEstimateTokens !== "number" || typeof record.maxOutputTokens !== "number" ||
     !clubLumenPrice
   ) return null;
+  // JSON.stringify drops undefined members, so an absent price means Lumen.
+  const sarvamPriced = record.sarvamPriced === true;
+  if (sarvamPriced && !price(prices.sarvam)) return null;
   return {
     requestId: record.requestId,
     sessionId: record.sessionId,
@@ -542,8 +558,14 @@ function parseAdmitInput(raw: unknown): AdmitInput | null {
       clubLumen,
       byok: upstreams.byok === true,
       opencodeGo: upstreams.opencodeGo === true,
+      sarvam: upstreams.sarvam === true,
     },
-    prices: { clubLumen: clubLumenPrice, opencodeGo: price(prices.opencodeGo) ?? undefined },
+    sarvamPriced,
+    prices: {
+      clubLumen: clubLumenPrice,
+      opencodeGo: price(prices.opencodeGo) ?? undefined,
+      sarvam: sarvamPriced ? price(prices.sarvam)! : undefined,
+    },
   };
 }
 
@@ -552,7 +574,7 @@ function parseSettleInput(raw: unknown): SettleInput | null {
   if (!raw || typeof raw !== "object" || !limits) return null;
   const record = raw as Record<string, unknown>;
   if (typeof record.requestId !== "string" || typeof record.route !== "string") return null;
-  if (record.route !== "club-lumen" && record.route !== "byok" && record.route !== "opencode-go") return null;
+  if (record.route !== "club-lumen" && record.route !== "byok" && record.route !== "opencode-go" && record.route !== "sarvam") return null;
   if (typeof record.costMicro !== "number" || !Number.isFinite(record.costMicro) || record.costMicro < 0) return null;
   if (record.status !== "ok" && record.status !== "error" && record.status !== "aborted") return null;
   if (typeof record.estimated !== "boolean" || typeof record.durationMs !== "number") return null;

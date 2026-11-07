@@ -7,6 +7,7 @@ const modelColors: Record<string, string> = {
   "deepseek-v4.1-flash": "#dd72f8",
   "qwen3.8-flash": "#a185f7",
   "deepseek-v4-flash": "#00bc7d",
+  "sarvam-105b": "#52cbec",
 };
 
 export function modelColor(model: string): string {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { addByokKey, deleteByokKey, listByokKeys } from "../lib/byok";
 import { Button } from "./button";
+import { DataTable, TableBody, TableHead, Td, Th } from "./data-table";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -91,33 +92,33 @@ export function PersonalLumenKeys({ initialKeys, loadError }: {
       </Dialog>
 
       {keys === null ? <p role="alert" className="text-sm text-red-700">{loadError} Reload the page to try again.</p> : (
-        <div className="dashboard-table-frame max-w-[960px] overflow-x-auto bg-[#eeeeee]">
-          <table className="dashboard-table api-keys-table w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
-            <caption className="sr-only">Personal Lumen keys with their name, masked token, creation date, and status.</caption>
-            <thead>
-              <tr className="text-sm text-neutral-500">
-                <th scope="col" className="px-6 py-2.5 font-medium">Name</th>
-                <th scope="col" className="px-5 py-2.5 font-medium">Token</th>
-                <th scope="col" className="px-5 py-2.5 font-medium">Created at</th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">Status</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody className="bg-white" data-single-row={keys.length === 1}>
-              {keys.map((item) => (
-                <tr key={item.id}>
-                  <td className="flex h-10 min-w-0 items-center px-6"><span className="block truncate" title={item.label}>{item.label}</span></td>
-                  <td className="flex h-10 items-center px-5">
-                    <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-500">••••••••••••{item.lastFive}</code>
-                  </td>
-                  <td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500">
-                    <time dateTime={new Date(item.createdAt).toISOString()}>{dateFormatter.format(new Date(item.createdAt))}</time>
-                  </td>
-                  <td className="flex h-10 items-center justify-end gap-1.5 px-3 text-xs" title={item.status === "active" ? undefined : "Lumen rejected this key. Remove it and add a valid key."}>
-                    <span aria-hidden="true" className={`size-1.5 rounded-full ${item.status === "active" ? "bg-green-600" : "bg-amber-500"}`} />
-                    {item.status === "active" ? "Active" : "Invalid"}
-                  </td>
-                  <td className="flex h-10 items-center justify-end pl-1 pr-3">
+        <DataTable variant="api-keys" minWidth={760} caption="Personal Lumen keys with their name, masked token, creation date, and status.">
+          <TableHead>
+            <Th pad="start" className="px-6 font-normal">Name</Th>
+            <Th className="px-5 font-normal">Token</Th>
+            <Th className="px-5 font-normal">Created at</Th>
+            <Th align="right" className="font-normal">Status</Th>
+            <Th><span className="sr-only">Actions</span></Th>
+          </TableHead>
+          <TableBody
+            rows={keys}
+            rowKey={(item) => item.id}
+            columns={5}
+            empty="No personal Lumen keys added yet."
+            renderRow={(item) => (
+              <>
+                <Td pad="start" className="flex h-10 min-w-0 items-center px-6"><span className="block truncate" title={item.label}>{item.label}</span></Td>
+                <Td className="flex h-10 items-center px-5">
+                  <code className="whitespace-nowrap rounded-[5px] border border-neutral-200/70 bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-500">••••••••••••{item.lastFive}</code>
+                </Td>
+                <Td className="flex h-10 items-center whitespace-nowrap px-5 text-neutral-500">
+                  <time dateTime={new Date(item.createdAt).toISOString()}>{dateFormatter.format(new Date(item.createdAt))}</time>
+                </Td>
+                <Td align="right" className="flex h-10 items-center justify-end gap-1.5 text-xs" title={item.status === "active" ? undefined : "Lumen rejected this key. Remove it and add a valid key."}>
+                  <span aria-hidden="true" className={`size-1.5 rounded-full ${item.status === "active" ? "bg-green-600" : "bg-amber-500"}`} />
+                  {item.status === "active" ? "Active" : "Invalid"}
+                </Td>
+                <Td align="right" pad="end" className="flex h-10 items-center justify-end pl-1 pr-3">
                     <Dialog open={deletingId === item.id} onOpenChange={(open) => {
                       if (deleting) return;
                       setDeletingId(open ? item.id : null);
@@ -155,13 +156,11 @@ export function PersonalLumenKeys({ initialKeys, loadError }: {
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
-                  </td>
-                </tr>
-              ))}
-              {keys.length === 0 && <tr><td colSpan={5} className="col-span-full px-6 py-8 text-center text-neutral-500">No personal Lumen keys added yet.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+                </Td>
+              </>
+            )}
+          />
+        </DataTable>
       )}
     </section>
   );

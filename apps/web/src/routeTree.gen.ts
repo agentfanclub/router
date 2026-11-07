@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardIndexRouteImport } from './routes/_dashboard.index'
 import { Route as DashboardAdminRouteImport } from './routes/_dashboard.admin'
 import { Route as DashboardApiKeysRouteImport } from './routes/_dashboard.api-keys'
+import { Route as DashboardLeaderboardRouteImport } from './routes/_dashboard.leaderboard'
 import { Route as DashboardLogsRouteImport } from './routes/_dashboard.logs'
 import { Route as DashboardModelsRouteImport } from './routes/_dashboard.models'
 import { Route as DashboardSetupRouteImport } from './routes/_dashboard.setup'
@@ -43,6 +44,11 @@ const DashboardAdminRoute = DashboardAdminRouteImport.update({
 const DashboardApiKeysRoute = DashboardApiKeysRouteImport.update({
   id: '/api-keys',
   path: '/api-keys',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardLeaderboardRoute = DashboardLeaderboardRouteImport.update({
+  id: '/leaderboard',
+  path: '/leaderboard',
   getParentRoute: () => DashboardRoute,
 } as any)
 const DashboardLogsRoute = DashboardLogsRouteImport.update({
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
+  '/leaderboard': typeof DashboardLeaderboardRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
   '/setup': typeof DashboardSetupRoute
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/admin': typeof DashboardAdminRoute
   '/api-keys': typeof DashboardApiKeysRoute
+  '/leaderboard': typeof DashboardLeaderboardRoute
   '/logs': typeof DashboardLogsRoute
   '/models': typeof DashboardModelsRoute
   '/setup': typeof DashboardSetupRoute
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_dashboard/admin': typeof DashboardAdminRoute
   '/_dashboard/api-keys': typeof DashboardApiKeysRoute
+  '/_dashboard/leaderboard': typeof DashboardLeaderboardRoute
   '/_dashboard/logs': typeof DashboardLogsRoute
   '/_dashboard/models': typeof DashboardModelsRoute
   '/_dashboard/setup': typeof DashboardSetupRoute
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin'
     | '/api-keys'
+    | '/leaderboard'
     | '/logs'
     | '/models'
     | '/setup'
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin'
     | '/api-keys'
+    | '/leaderboard'
     | '/logs'
     | '/models'
     | '/setup'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_dashboard/admin'
     | '/_dashboard/api-keys'
+    | '/_dashboard/leaderboard'
     | '/_dashboard/logs'
     | '/_dashboard/models'
     | '/_dashboard/setup'
@@ -199,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardApiKeysRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/_dashboard/leaderboard': {
+      id: '/_dashboard/leaderboard'
+      path: '/leaderboard'
+      fullPath: '/leaderboard'
+      preLoaderRoute: typeof DashboardLeaderboardRouteImport
+      parentRoute: typeof DashboardRoute
+    }
     '/_dashboard/logs': {
       id: '/_dashboard/logs'
       path: '/logs'
@@ -247,6 +266,7 @@ declare module '@tanstack/react-router' {
 interface DashboardRouteChildren {
   DashboardAdminRoute: typeof DashboardAdminRoute
   DashboardApiKeysRoute: typeof DashboardApiKeysRoute
+  DashboardLeaderboardRoute: typeof DashboardLeaderboardRoute
   DashboardLogsRoute: typeof DashboardLogsRoute
   DashboardModelsRoute: typeof DashboardModelsRoute
   DashboardSetupRoute: typeof DashboardSetupRoute
@@ -256,6 +276,7 @@ interface DashboardRouteChildren {
 const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardAdminRoute: DashboardAdminRoute,
   DashboardApiKeysRoute: DashboardApiKeysRoute,
+  DashboardLeaderboardRoute: DashboardLeaderboardRoute,
   DashboardLogsRoute: DashboardLogsRoute,
   DashboardModelsRoute: DashboardModelsRoute,
   DashboardSetupRoute: DashboardSetupRoute,

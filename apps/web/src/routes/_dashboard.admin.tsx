@@ -5,6 +5,7 @@ import { getSession } from "../lib/session";
 import { getLumenUsage, listUsers } from "../lib/admin";
 import { getAdminUsage, updateUserLimits } from "../lib/usage";
 import { formatUsdMicro, localTimeZoneLabel } from "../lib/format";
+import { DataTable, TableBody, TableHead, Td, Th } from "../components/data-table";
 
 export const DEFAULT_FIVE_HOUR_LIMIT_MICRO = 10_000_000;
 export const DEFAULT_WEEKLY_LIMIT_MICRO = 50_000_000;
@@ -107,86 +108,78 @@ function Page() {
               title={unit === "coins" ? "Daily cost in coins" : "Daily token usage"}
               description="Total usage across all users, including club and personal keys"
             />
-            <div className="dashboard-table-frame mt-6 overflow-x-auto bg-[#eeeeee]">
-              <table className="dashboard-table users-table w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
-                <caption className="sr-only">Users with their roles, spend, and usage limits.</caption>
-                <thead>
-                  <tr className="text-neutral-500">
-                    <th scope="col" className="px-5 py-2.5 font-medium">Name</th>
-                    <th scope="col" className="px-3 py-2.5 font-medium">Email</th>
-                    <th scope="col" className="px-3 py-2.5 font-medium">Role</th>
-                    <th scope="col" className="px-3 py-2.5 font-medium">Spend</th>
-                    <th scope="col" className="px-5 py-2.5 font-medium">Limits (5h / week)</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white" data-single-row={users.length === 1 ? "true" : undefined}>
-                  {users.map((user) => {
-                    const spend = adminResult.usage!.perUser.find((row) => row.userId === user.id);
-                    return (
-                      <tr key={user.id}>
-                        <td className="truncate px-5 py-3 text-neutral-800" title={user.name}>{user.name || "—"}</td>
-                        <td className="truncate px-3 py-3" title={user.email}>{user.email}</td>
-                        <td className="px-3 py-3">
-                          <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                          {spend
-                            ? <>
-                                <span className="text-neutral-800">{formatUsdMicro(spend.clubMicro)}</span>
-                                {spend.personalMicro > 0 && (
-                                  <span className="text-neutral-400" title="Spend on the user's personal Lumen key">
-                                    {" "}+ {formatUsdMicro(spend.personalMicro)} personal
-                                  </span>
-                                )}
-                                <span className="block text-xs text-neutral-400">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
-                              </>
-                            : "—"}
-                        </td>
-                        <td className="px-5 py-3">
-                          <LimitsEditor
-                            userId={user.id}
-                            fiveHourMicro={user.fiveHourMicro}
-                            weeklyMicro={user.weeklyMicro}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {users.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="col-span-full px-6 py-8 text-center text-neutral-500">No users yet.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable variant="users" minWidth={720} caption="Users with their roles, spend, and usage limits." className="mt-6">
+              <TableHead>
+                <Th pad="start" className="px-5">Name</Th>
+                <Th>Email</Th>
+                <Th>Role</Th>
+                <Th>Spend</Th>
+                <Th pad="end" className="px-5">Limits (5h / week)</Th>
+              </TableHead>
+              <TableBody
+                rows={users}
+                rowKey={(user) => user.id}
+                columns={5}
+                empty="No users yet."
+                renderRow={(user) => {
+                  const spend = adminResult.usage!.perUser.find((row) => row.userId === user.id);
+                  return (
+                    <>
+                      <Td pad="start" className="truncate px-5 text-neutral-800" title={user.name}>{user.name || "—"}</Td>
+                      <Td className="truncate" title={user.email}>{user.email}</Td>
+                      <Td>
+                        <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
+                      </Td>
+                      <Td className="whitespace-nowrap tabular-nums">
+                        {spend
+                          ? <>
+                              <span className="text-neutral-800">{formatUsdMicro(spend.clubMicro)}</span>
+                              {spend.personalMicro > 0 && (
+                                <span className="text-neutral-400" title="Spend on the user's personal Lumen key">
+                                  {" "}+ {formatUsdMicro(spend.personalMicro)} personal
+                                </span>
+                              )}
+                              <span className="block text-xs text-neutral-400">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
+                            </>
+                          : "—"}
+                      </Td>
+                      <Td pad="end" className="px-5">
+                        <LimitsEditor
+                          userId={user.id}
+                          fiveHourMicro={user.fiveHourMicro}
+                          weeklyMicro={user.weeklyMicro}
+                        />
+                      </Td>
+                    </>
+                  );
+                }}
+              />
+            </DataTable>
 
             {adminResult.usage.perModel.length > 0 && (
-              <div className="dashboard-table-frame mt-6 overflow-x-auto bg-[#eeeeee]">
-                <table className="dashboard-table models-usage-table w-full min-w-[560px] border-separate border-spacing-0 text-left text-sm text-neutral-600">
-                  <caption className="sr-only">Spend per model over the selected range.</caption>
-                  <thead>
-                    <tr className="text-neutral-500">
-                      <th scope="col" className="px-5 py-2.5 font-medium">Model</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Requests</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Input tokens</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Output tokens</th>
-                      <th scope="col" className="px-5 py-2.5 font-medium">Spend</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white" data-single-row={adminResult.usage.perModel.length === 1 ? "true" : undefined}>
-                    {adminResult.usage.perModel.map((row) => (
-                      <tr key={row.model}>
-                        <td className="truncate px-5 py-3 text-neutral-800" title={row.model}>{row.model}</td>
-                        <td className="px-3 py-3 tabular-nums">{row.requests.toLocaleString("en-US")}</td>
-                        <td className="px-3 py-3 tabular-nums">{row.inputTokens.toLocaleString("en-US")}</td>
-                        <td className="px-3 py-3 tabular-nums">{row.outputTokens.toLocaleString("en-US")}</td>
-                        <td className="whitespace-nowrap px-5 py-3 tabular-nums">{formatUsdMicro(row.costMicro)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable variant="models-usage" minWidth={560} caption="Spend per model over the selected range." className="mt-6">
+                <TableHead>
+                  <Th pad="start" className="px-5">Model</Th>
+                  <Th>Requests</Th>
+                  <Th>Input tokens</Th>
+                  <Th>Output tokens</Th>
+                  <Th pad="end" className="px-5">Spend</Th>
+                </TableHead>
+                <TableBody
+                  rows={adminResult.usage.perModel}
+                  rowKey={(row) => row.model}
+                  columns={5}
+                  renderRow={(row) => (
+                    <>
+                      <Td pad="start" className="truncate px-5 text-neutral-800" title={row.model}>{row.model}</Td>
+                      <Td className="tabular-nums">{row.requests.toLocaleString("en-US")}</Td>
+                      <Td className="tabular-nums">{row.inputTokens.toLocaleString("en-US")}</Td>
+                      <Td className="tabular-nums">{row.outputTokens.toLocaleString("en-US")}</Td>
+                      <Td pad="end" className="whitespace-nowrap px-5 tabular-nums">{formatUsdMicro(row.costMicro)}</Td>
+                    </>
+                  )}
+                />
+              </DataTable>
             )}
           </>
         ) : (

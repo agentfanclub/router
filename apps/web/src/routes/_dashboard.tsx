@@ -80,9 +80,14 @@ function Dashboard() {
             </Link>
           ))}
           {user.role === "admin" && (
-            <Link to="/admin" activeOptions={{ exact: true, includeSearch: false }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
-              Admin
-            </Link>
+            <>
+              <Link to="/leaderboard" activeOptions={{ exact: true, includeSearch: false }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
+                Leaderboard
+              </Link>
+              <Link to="/admin" activeOptions={{ exact: true, includeSearch: false }} className="inline-flex min-h-[46px] shrink-0 cursor-pointer items-center whitespace-nowrap border-b-[3px] border-transparent text-[13px] font-normal text-neutral-500 aria-[current=page]:border-neutral-700 aria-[current=page]:text-neutral-800">
+                Admin
+              </Link>
+            </>
           )}
         </nav>
         <main id="dashboard-content" className="relative min-h-0 flex-1 overflow-y-auto bg-white">

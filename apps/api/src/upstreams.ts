@@ -8,7 +8,10 @@ export type UpstreamRoute = UpstreamId | "byok";
 interface Upstream {
   name: string;
   url: string;
-  credential: (env: ApiEnv) => string | undefined;
+  // Secret holding the upstream's API keys, comma or whitespace separated.
+  // Each request picks one at random, which spreads load across per-key
+  // rate limits.
+  keysSecret: "LUMEN_API_KEYS" | "SARVAM_API_KEY";
   // Adjusts the outgoing chat body for provider quirks.
   prepareBody?: (body: Record<string, unknown>) => void;
 }
@@ -17,12 +20,12 @@ export const upstreams: Record<UpstreamId, Upstream> = {
   lumen: {
     name: "Lumen",
     url: "https://lumen.ncsa.illinois.edu/v1/chat/completions",
-    credential: (env) => env.LUMEN_API_KEY,
+    keysSecret: "LUMEN_API_KEYS",
   },
   sarvam: {
     name: "Sarvam",
     url: "https://api.sarvam.ai/v1/chat/completions",
-    credential: (env) => env.SARVAM_API_KEY,
+    keysSecret: "SARVAM_API_KEY",
     prepareBody(body) {
       // Sarvam only understands max_tokens, and reasons at length unless
       // given an effort. Reasoning tokens are billed as output.
@@ -34,6 +37,10 @@ export const upstreams: Record<UpstreamId, Upstream> = {
     },
   },
 };
+
+export function upstreamKeys(env: ApiEnv, id: UpstreamId): string[] {
+  return env[upstreams[id].keysSecret]?.split(/[\s,]+/).filter(Boolean) ?? [];
+}
 
 type RawModel = (typeof models)[keyof typeof models];
 

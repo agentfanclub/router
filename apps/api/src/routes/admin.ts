@@ -5,6 +5,7 @@ import { user, usageLimit, usageLog } from "../db/schema";
 import { ApiError, decodeBody, decodeQuery, failWith } from "../http";
 import { UserSession, userAuthMiddleware } from "../middleware/user-auth";
 import { query, WorkerEnv } from "../services";
+import { upstreamKeys } from "../upstreams";
 import { calendarDay, localDayStart, parseUtcOffsetMinutes } from "../util/timezone";
 
 export type User = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "role"> & {
@@ -187,10 +188,12 @@ export const adminRoutes = Layer.mergeAll(
 
   HttpRouter.add("GET", "/api/admin/lumen-usage", Effect.fn("lumenUsage")(function* () {
     const env = yield* WorkerEnv;
-    if (!env.LUMEN_API_KEY) return yield* failWith(503, "Lumen API key is not configured.");
+    // Reports the account behind the first configured key.
+    const [key] = upstreamKeys(env, "lumen");
+    if (!key) return yield* failWith(503, "Lumen API key is not configured.");
 
     const response = yield* Effect.tryPromise(() => fetch("https://lumen.ncsa.illinois.edu/v1/usage", {
-      headers: { authorization: `Bearer ${env.LUMEN_API_KEY}` },
+      headers: { authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(15_000),
       redirect: "manual",
     })).pipe(Effect.orElseSucceed(() => null));

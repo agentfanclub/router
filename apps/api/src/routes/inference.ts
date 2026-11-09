@@ -6,7 +6,7 @@ import type { DenyReason, UsageSnapshot } from "../do/user-usage";
 import { OpenAiError } from "../http";
 import { ApiKeyIdentity, inferenceKeyAuth } from "../middleware/api-key-auth";
 import { query, UsageCoordinator, WorkerEnv, WorkerExecution } from "../services";
-import { catalog, upstreams, type CatalogModel, type UpstreamRoute } from "../upstreams";
+import { catalog, upstreamKeys, upstreams, type CatalogModel, type UpstreamRoute } from "../upstreams";
 import { decryptSecret } from "../util/secret-box";
 import { usageCaptureTransform } from "../util/sse-usage";
 import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
@@ -24,6 +24,9 @@ type Status = "ok" | "error" | "aborted";
 // Upstream statuses meaning "this account cannot serve right now". The next
 // route is tried before the client sees anything.
 const FAILOVER_STATUSES = [401, 402, 429];
+
+// Club keys tried per route before failing over to the next one.
+const KEYS_PER_ROUTE = 3;
 
 // The fields the router reads. Everything else is forwarded untouched.
 const ChatFields = Schema.Struct({
@@ -88,7 +91,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
 
   // Club upstreams serving the model with a configured key, in priority
   // order, then the user's own key when it can serve the model.
-  const routes: UpstreamRoute[] = model.upstreams.filter((id) => upstreams[id].credential(env));
+  const routes: UpstreamRoute[] = model.upstreams.filter((id) => upstreamKeys(env, id).length > 0);
   if (identity.byok && env.BYOK_ENCRYPTION_KEY && model.upstreams.includes("lumen")) routes.push("byok");
   if (routes.length === 0) {
     console.error({ event: "inference_no_upstream", ...logContext });
@@ -147,9 +150,23 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   };
   const settleNow = (status: Status, parsed: ParsedUsage | null = null) => Effect.promise(() => finish(status, parsed));
 
-  const credential = (candidate: UpstreamRoute) => candidate === "byok"
-    ? Effect.tryPromise(() => decryptSecret(identity.byok!.ciphertext, env.BYOK_ENCRYPTION_KEY!)).pipe(Effect.orElseSucceed(() => null))
-    : Effect.succeed(upstreams[candidate].credential(env) ?? null);
+  let byokUnreadable = false;
+
+  // The next key to try on a route, or null when the route has none left.
+  const nextKey = Effect.fn(function* (candidate: UpstreamRoute, tried: ReadonlySet<string>) {
+    if (candidate === "byok") {
+      if (tried.size > 0) return null;
+      const key = yield* Effect.tryPromise(() => decryptSecret(identity.byok!.ciphertext, env.BYOK_ENCRYPTION_KEY!)).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      byokUnreadable ||= key === null;
+      return key;
+    }
+    // A random untried key. Random choice evens out across per-key rate
+    // limits without tracking usage.
+    const keys = upstreamKeys(env, candidate).filter((key) => !tried.has(key));
+    return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)]! : null;
+  });
 
   let attempt = 0;
   const send = (candidate: UpstreamRoute, key: string) => {
@@ -205,22 +222,23 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   const attempts = decision.route === "byok"
     ? ["byok" as const]
     : [decision.route, ...routes.filter((candidate) => candidate !== decision.route)];
+  // Within a club route, a refused key is followed by another random key.
   let upstream: Response | null = null;
-  let byokUnreadable = false;
-  for (const candidate of attempts) {
-    if (signal.aborted) break;
-    const key = yield* credential(candidate);
-    if (!key) {
-      byokUnreadable ||= candidate === "byok";
-      continue;
+  routes: for (const candidate of attempts) {
+    const tried = new Set<string>();
+    while (tried.size < KEYS_PER_ROUTE && !signal.aborted) {
+      const key = yield* nextKey(candidate, tried);
+      if (!key) break;
+      tried.add(key);
+      const response = yield* send(candidate, key);
+      // An unreachable upstream will not answer on another key either.
+      if (!response) continue routes;
+      void upstream?.body?.cancel().catch(() => { });
+      upstream = response;
+      route = candidate;
+      if (candidate === "byok" && (response.status === 401 || response.status === 403)) yield* invalidateByok;
+      if (!FAILOVER_STATUSES.includes(response.status)) break routes;
     }
-    const response = yield* send(candidate, key);
-    if (!response) continue;
-    void upstream?.body?.cancel().catch(() => { });
-    upstream = response;
-    route = candidate;
-    if (candidate === "byok" && (response.status === 401 || response.status === 403)) yield* invalidateByok;
-    if (!FAILOVER_STATUSES.includes(response.status)) break;
   }
 
   if (!upstream) {

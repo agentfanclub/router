@@ -6,7 +6,8 @@ import { usageLimit, usageLog, usageTotal } from "../db/schema";
 import { ApiError, decodeQuery } from "../http";
 import { UserSession, userAuth } from "../middleware/user-auth";
 import { query, UsageCoordinator } from "../services";
-import { addDays, centralDay, centralDaySql, centralDayStart, centralOffsetMinutes } from "../util/timezone";
+import { dailyUsage } from "../usage-aggregates";
+import { addDays, centralDay, centralOffsetMinutes } from "../util/timezone";
 import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
 
 export type UsageLogRow = Pick<
@@ -17,9 +18,11 @@ export type UsageLogRow = Pick<
 export interface UsageStatus {
   fiveHour: { usedPercent: number; pendingPercent: number; resetsInMs: number };
   weekly: { usedPercent: number; pendingPercent: number; resetsInMs: number };
+  // The 7 and 30 day figures are Central calendar days, including today.
   tokens: { lifetime: number; last24Hours: number; last7Days: number; last30Days: number };
   // Sparse daily model totals for the last 30 Central calendar days. The chart fills gaps.
   history: { day: string; model: string; tokens: number }[];
+  // Over the last 30 Central days, and the last 7.
   perModel: { model: string; inputTokens: number; outputTokens: number; cachedTokens: number; chargeMicro: number; last7DaysTokens: number; last7DaysChargeMicro: number }[];
   // Central time's current UTC offset in minutes east, for laying out the chart's days.
   tzOffset: number;
@@ -86,37 +89,41 @@ export const usageRoutes = Layer.mergeAll(
     );
 
     const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
+    const today = centralDay(now);
+    const since7 = addDays(today, -6);
     // prompt_tokens already includes cached input. Count those tokens once.
-    const totalTokens = sql`COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)`;
-    const userFilter = eq(usageLog.userId, session.user.id);
-    const [[lifetime], [recent], history, perModel] = yield* query((db) => Promise.all([
+    const [[lifetime], [recent], daily] = yield* query((db) => Promise.all([
       db.select({ tokens: sql<number>`COALESCE(SUM(${usageTotal.inputTokens} + ${usageTotal.outputTokens}), 0)` })
         .from(usageTotal).where(eq(usageTotal.userId, session.user.id)),
-      db.select({
-        last24Hours: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-        last7Days: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-        last30Days: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
-      }).from(usageLog).where(and(userFilter, gte(usageLog.createdAt, new Date(now - 30 * dayMs)))),
-      db.select({
-        day: centralDaySql(usageLog.createdAt),
-        model: usageLog.model,
-        tokens: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
-      }).from(usageLog)
-        .where(and(userFilter, gte(usageLog.createdAt, new Date(centralDayStart(addDays(centralDay(now), -29))))))
-        .groupBy(sql`1`, usageLog.model).orderBy(sql`1`, usageLog.model),
-      db.select({
-        model: usageLog.model,
-        inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
-        outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
-        cachedTokens: sql<number>`COALESCE(SUM(${usageLog.cachedTokens}), 0)`,
-        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
-        last7DaysTokens: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-        last7DaysChargeMicro: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${usageLog.chargeMicro} ELSE 0 END), 0)`,
-      }).from(usageLog)
-        .where(and(userFilter, gte(usageLog.createdAt, new Date(now - 30 * dayMs))))
-        .groupBy(usageLog.model).orderBy(desc(sql`SUM(${totalTokens})`)),
+      db.select({ tokens: sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)` })
+        .from(usageLog).where(and(eq(usageLog.userId, session.user.id), gte(usageLog.createdAt, new Date(now - 24 * 60 * 60 * 1000)))),
+      dailyUsage(db.$client, { since: addDays(today, -29), userId: session.user.id }),
     ]));
+
+    const tokens = { lifetime: lifetime!.tokens, last24Hours: recent!.tokens, last7Days: 0, last30Days: 0 };
+    const history = new Map<string, UsageStatus["history"][number]>();
+    const perModel = new Map<string, UsageStatus["perModel"][number]>();
+    for (const row of daily) {
+      const rowTokens = row.inputTokens + row.outputTokens;
+      const charge = row.clubChargeMicro + row.personalChargeMicro;
+      const inLast7 = row.day >= since7;
+      tokens.last30Days += rowTokens;
+      if (inLast7) tokens.last7Days += rowTokens;
+      const key = `${row.day}\u0000${row.model}`;
+      const point = history.get(key) ?? { day: row.day, model: row.model, tokens: 0 };
+      point.tokens += rowTokens;
+      history.set(key, point);
+      const model = perModel.get(row.model) ?? { model: row.model, inputTokens: 0, outputTokens: 0, cachedTokens: 0, chargeMicro: 0, last7DaysTokens: 0, last7DaysChargeMicro: 0 };
+      model.inputTokens += row.inputTokens;
+      model.outputTokens += row.outputTokens;
+      model.cachedTokens += row.cachedTokens;
+      model.chargeMicro += charge;
+      if (inLast7) {
+        model.last7DaysTokens += rowTokens;
+        model.last7DaysChargeMicro += charge;
+      }
+      perModel.set(row.model, model);
+    }
 
     const publicWindow = (window: UsageSnapshot["fiveHour"]) => ({
       usedPercent: window.limitMicro > 0 ? window.usedMicro / window.limitMicro * 100 : 100,
@@ -126,8 +133,9 @@ export const usageRoutes = Layer.mergeAll(
     return HttpServerResponse.jsonUnsafe({
       fiveHour: publicWindow(windows.fiveHour),
       weekly: publicWindow(windows.weekly),
-      tokens: { lifetime: lifetime!.tokens, ...recent! },
-      history, perModel,
+      tokens,
+      history: [...history.values()],
+      perModel: [...perModel.values()].sort((a, b) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens)),
       tzOffset: centralOffsetMinutes(now),
     } satisfies UsageStatus);
   })),

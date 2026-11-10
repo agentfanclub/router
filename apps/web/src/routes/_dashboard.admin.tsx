@@ -158,7 +158,7 @@ function Page() {
             </DataTable>
 
             {adminResult.usage.perModel.length > 0 && (
-              <DataTable variant="models-usage" minWidth={640} caption="Club charges and upstream cost per model over the selected range." className="mt-6">
+              <DataTable variant="models-usage" minWidth={640} caption="Charges at router prices and upstream cost per model over the selected range." className="mt-6">
                 <TableHead>
                   <Th pad="start" className="px-5">Model</Th>
                   <Th>Requests</Th>

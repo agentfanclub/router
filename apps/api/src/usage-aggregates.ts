@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { sql, type SQL } from "drizzle-orm";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import type { usageLog } from "./db/schema";
 import { query } from "./services";
@@ -16,7 +17,7 @@ export type UsageRecord = Omit<typeof usageLog.$inferSelect, "createdAt"> & { cr
 // same version twice changes nothing.
 //
 // A record re-written after the rollup deleted its log row would be counted
-// twice. The journal settles records within minutes and logs live 30 days,
+// twice. The journal settles records within minutes and logs live 7 days,
 // so that never happens in practice.
 export function usageWriteStatements(d1: D1Database, record: UsageRecord): D1PreparedStatement[] {
   const total = d1.prepare(`
@@ -67,52 +68,80 @@ export function usageWriteStatements(d1: D1Database, record: UsageRecord): D1Pre
   return [total, log];
 }
 
-// Raw logs are kept for this many full Central days, enough for every 30 day
-// view. Older logs survive only as daily totals.
-export const LOG_RETENTION_DAYS = 30;
+// Raw logs are kept for this many full Central days before today. They back
+// the logs and sessions pages; older usage survives only as daily totals.
+export const LOG_RETENTION_DAYS = 7;
 
-const logDay = new SQLiteSyncDialect().sqlToQuery(centralDaySql("created_at")).sql;
+// Renders a drizzle SQL fragment as a D1 statement.
+const dialect = new SQLiteSyncDialect();
+function prepare(d1: D1Database, query: SQL): D1PreparedStatement {
+  const { sql: text, params } = dialect.sqlToQuery(query);
+  return d1.prepare(text).bind(...params);
+}
+
+const DAILY_COLUMNS = sql.raw(`user_id, day, model, requests, sessions, input_tokens, output_tokens, cached_tokens,
+  club_charge_micro, personal_charge_micro, cost_micro`);
+
+// Logs summed into usage_daily rows. A session counts once per user and day,
+// under the model of its first request that day.
+function logsByDay(filter: SQL): SQL {
+  return sql`
+    SELECT user_id, day, model,
+      COUNT(*) AS requests,
+      SUM(CASE WHEN session_id IS NOT NULL AND session_order = 1 THEN 1 ELSE 0 END) AS sessions,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+      COALESCE(SUM(CASE WHEN billed = 'club' THEN charge_micro ELSE 0 END), 0) AS club_charge_micro,
+      COALESCE(SUM(CASE WHEN billed = 'personal' THEN charge_micro ELSE 0 END), 0) AS personal_charge_micro,
+      COALESCE(SUM(cost_micro), 0) AS cost_micro
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id, day, session_id ORDER BY created_at, id) AS session_order
+      FROM (SELECT *, ${centralDaySql("created_at")} AS day FROM usage_log WHERE ${filter})
+    )
+    GROUP BY user_id, day, model`;
+}
+
+export interface DailyUsageRow {
+  userId: string;
+  day: string;
+  model: string;
+  requests: number;
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  clubChargeMicro: number;
+  personalChargeMicro: number;
+  costMicro: number;
+}
+
+// Usage per user, Central day, and model from `since` through today, from
+// rolled-up days and the logs not yet rolled up. Optionally one user's only.
+export async function dailyUsage(d1: D1Database, { since, userId }: { since: string; userId?: string }): Promise<DailyUsageRow[]> {
+  const forUser = userId === undefined ? sql`` : sql` AND user_id = ${userId}`;
+  const { results } = await prepare(d1, sql`
+    SELECT user_id AS userId, day, model, requests, sessions, input_tokens AS inputTokens, output_tokens AS outputTokens,
+      cached_tokens AS cachedTokens, club_charge_micro AS clubChargeMicro, personal_charge_micro AS personalChargeMicro,
+      cost_micro AS costMicro
+    FROM (
+      SELECT ${DAILY_COLUMNS} FROM usage_daily WHERE day >= ${since}${forUser}
+      UNION ALL
+      ${logsByDay(sql`created_at >= ${centralDayStart(since)}${forUser}`)}
+    )
+    ORDER BY day, model`).all<DailyUsageRow>();
+  return results;
+}
 
 // Folds logs from Central days past retention into usage_daily, then deletes
 // them, in one transaction so nothing is counted twice or lost.
 export function rollUpStatements(d1: D1Database, now: number): { cutoff: number; statements: D1PreparedStatement[] } {
   const cutoff = centralDayStart(addDays(centralDay(now), -LOG_RETENTION_DAYS));
-  const rollUp = d1.prepare(`
-    WITH logs AS (
-      SELECT ${logDay} AS day, * FROM usage_log WHERE created_at < ?1
-    ),
-    per_model AS (
-      SELECT day, user_id, model,
-        COUNT(*) AS requests,
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-        SUM(CASE WHEN billed = 'club' THEN charge_micro ELSE 0 END) AS club_charge_micro,
-        SUM(CASE WHEN billed = 'personal' THEN charge_micro ELSE 0 END) AS personal_charge_micro,
-        SUM(cost_micro) AS cost_micro
-      FROM logs GROUP BY day, user_id, model
-    ),
-    per_user AS (
-      SELECT day, user_id, COUNT(DISTINCT session_id) AS sessions FROM logs GROUP BY day, user_id
-    )
-    INSERT INTO usage_daily (day, user_id, requests, sessions, input_tokens, output_tokens, cached_tokens,
-      club_charge_micro, personal_charge_micro, cost_micro, models)
-    SELECT m.day, m.user_id, SUM(m.requests), u.sessions,
-      SUM(m.input_tokens), SUM(m.output_tokens), SUM(m.cached_tokens),
-      SUM(m.club_charge_micro), SUM(m.personal_charge_micro), SUM(m.cost_micro),
-      json_group_object(m.model, json_object(
-        'requests', m.requests,
-        'inputTokens', m.input_tokens,
-        'outputTokens', m.output_tokens,
-        'cachedTokens', m.cached_tokens,
-        'chargeMicro', m.club_charge_micro + m.personal_charge_micro,
-        'costMicro', m.cost_micro
-      ))
-    FROM per_model m JOIN per_user u USING (day, user_id)
-    GROUP BY m.day, m.user_id
-    -- Only a log written long after its day was rolled up conflicts. Its
-    -- totals are added, but the per-model breakdown keeps the original.
-    ON CONFLICT (user_id, day) DO UPDATE SET
+  const rollUp = prepare(d1, sql`
+    INSERT INTO usage_daily (${DAILY_COLUMNS})
+    SELECT * FROM (${logsByDay(sql`created_at < ${cutoff}`)}) WHERE true
+    -- Only a log written long after its day was rolled up conflicts.
+    ON CONFLICT (user_id, day, model) DO UPDATE SET
       requests = requests + excluded.requests,
       sessions = sessions + excluded.sessions,
       input_tokens = input_tokens + excluded.input_tokens,
@@ -120,8 +149,7 @@ export function rollUpStatements(d1: D1Database, now: number): { cutoff: number;
       cached_tokens = cached_tokens + excluded.cached_tokens,
       club_charge_micro = club_charge_micro + excluded.club_charge_micro,
       personal_charge_micro = personal_charge_micro + excluded.personal_charge_micro,
-      cost_micro = cost_micro + excluded.cost_micro
-  `).bind(cutoff);
+      cost_micro = cost_micro + excluded.cost_micro`);
   const prune = d1.prepare("DELETE FROM usage_log WHERE created_at < ?1").bind(cutoff);
   return { cutoff, statements: [rollUp, prune] };
 }

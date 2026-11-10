@@ -78,6 +78,13 @@
       "when": 1794352765954,
       "tag": "0010_usage_totals",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794353356259,
+      "tag": "0011_usage_daily_by_model",
+      "breakpoints": true
     }
   ]
 }

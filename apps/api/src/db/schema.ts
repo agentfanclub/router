@@ -115,21 +115,14 @@ export const usageTotal = sqliteTable("usage_total", {
   costMicro: integer("cost_micro").notNull(),
 }, (table) => [primaryKey({ columns: [table.userId, table.model] })]);
 
-// Daily totals of usage logs older than the raw retention window, one row
-// per user and Central calendar day. The nightly rollup folds logs in and
-// deletes them in one transaction.
-export interface DailyModelUsage {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
-  chargeMicro: number;
-  costMicro: number;
-}
-
+// Daily totals of usage logs older than the raw retention window, per user,
+// Central calendar day, and model. The nightly rollup folds logs in and
+// deletes them in one transaction. Sessions count once per user and day,
+// under the model of their first request that day.
 export const usageDaily = sqliteTable("usage_daily", {
-  day: text("day").notNull(),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  day: text("day").notNull(),
+  model: text("model").notNull(),
   requests: integer("requests").notNull(),
   sessions: integer("sessions").notNull(),
   inputTokens: integer("input_tokens").notNull(),
@@ -138,9 +131,10 @@ export const usageDaily = sqliteTable("usage_daily", {
   clubChargeMicro: integer("club_charge_micro").notNull(),
   personalChargeMicro: integer("personal_charge_micro").notNull(),
   costMicro: integer("cost_micro").notNull(),
-  // The same totals broken down by model ID.
-  models: text("models", { mode: "json" }).$type<Record<string, DailyModelUsage>>().notNull(),
-}, (table) => [primaryKey({ columns: [table.userId, table.day] })]);
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.day, table.model] }),
+  index("usage_daily_day_idx").on(table.day),
+]);
 
 // Per-user overrides of the default usage caps. Null columns fall back to the defaults.
 export const usageLimit = sqliteTable("usage_limit", {

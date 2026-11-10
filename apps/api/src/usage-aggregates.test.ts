@@ -1,13 +1,18 @@
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "bun:test";
-import { rollUpStatements, usageWriteStatements, type UsageRecord } from "./usage-aggregates";
+import { dailyUsage, rollUpStatements, usageWriteStatements, type UsageRecord } from "./usage-aggregates";
 
 // Applies the real migrations to in-memory SQLite and runs statements
 // through a minimal D1 stand-in.
 let sqlite: Database;
 const d1 = {
-  prepare: (sql: string) => ({ sql, params: [] as unknown[], bind(...params: unknown[]) { return { ...this, params }; } }),
+  prepare: (sql: string) => ({
+    sql,
+    params: [] as unknown[],
+    bind(...params: unknown[]) { return { ...this, params }; },
+    async all() { return { results: sqlite.query(this.sql).all(...(this.params as never[])) }; },
+  }),
   batch: async (statements: { sql: string; params: unknown[] }[]) => sqlite.transaction(() =>
     statements.map(({ sql, params }) => ({ meta: { changes: sqlite.query(sql).run(...(params as never[])).changes } })))(),
 } as unknown as D1Database;
@@ -93,23 +98,45 @@ test("the backfill migration matches live writes", async () => {
   expect(sqlite.query(`SELECT charge_micro, cost_micro FROM usage_log WHERE id = 'req-4'`).get()).toEqual({ charge_micro: 900, cost_micro: 0 });
 });
 
-test("the rollup folds logs past retention into Central days and deletes them", async () => {
-  const now = Date.parse("2026-12-01T06:15:00Z"); // 00:15 CST on Dec 1. Logs from Nov 1 onward stay.
-  await write(settled({ id: "a", createdAt: Date.parse("2026-11-01T04:59:00Z") })); // Oct 31, 23:59 CDT
-  await write(settled({ id: "b", createdAt: Date.parse("2026-10-31T05:00:00Z"), model: "deepseek-v4-flash", upstream: "byok", billed: "personal", costMicro: 0 }));
-  await write(settled({ id: "c", createdAt: Date.parse("2026-11-01T05:00:00Z") })); // Nov 1, 00:00 CDT
-  const before = totals();
+describe("daily rollup", () => {
+  const now = Date.parse("2026-11-09T06:15:00Z"); // 00:15 CST on Nov 9. Logs from Nov 2 onward stay.
+  const writeDays = async () => {
+    await write(settled({ id: "a", createdAt: Date.parse("2026-11-01T05:30:00Z") })); // Nov 1, 00:30 CDT
+    await write(settled({ id: "b", createdAt: Date.parse("2026-11-01T06:30:00Z") })); // Nov 1, 00:30 CST
+    await write(settled({ id: "c", createdAt: Date.parse("2026-11-02T05:59:00Z"), model: "deepseek-v4-flash", upstream: "byok", billed: "personal", costMicro: 0 })); // Nov 1, 23:59 CST
+    await write(settled({ id: "d", createdAt: Date.parse("2026-11-02T06:00:00Z") })); // Nov 2, 00:00 CST
+    await write(settled({ id: "e", createdAt: Date.parse("2026-11-08T12:00:00Z"), sessionId: "ses_b" }));
+  };
+  const rollUp = () => d1.batch(rollUpStatements(d1, now).statements);
 
-  const { cutoff, statements } = rollUpStatements(d1, now);
-  expect(new Date(cutoff).toISOString()).toBe("2026-11-01T05:00:00.000Z");
-  await d1.batch(statements);
+  test("folds logs from days past retention into Central days and deletes them", async () => {
+    await writeDays();
+    const before = totals();
+    expect(new Date(rollUpStatements(d1, now).cutoff).toISOString()).toBe("2026-11-02T06:00:00.000Z");
+    await rollUp();
 
-  expect(sqlite.query(`SELECT id FROM usage_log`).all()).toEqual([{ id: "c" }]);
-  const [day] = sqlite.query(`SELECT * FROM usage_daily`).all() as Record<string, unknown>[];
-  expect(day).toMatchObject({ day: "2026-10-31", requests: 2, sessions: 1, club_charge_micro: 900, personal_charge_micro: 900, cost_micro: 600 });
-  expect(JSON.parse(day!.models as string)).toEqual({
-    "glm-5.3": { requests: 1, inputTokens: 100, outputTokens: 50, cachedTokens: 10, chargeMicro: 900, costMicro: 600 },
-    "deepseek-v4-flash": { requests: 1, inputTokens: 100, outputTokens: 50, cachedTokens: 10, chargeMicro: 900, costMicro: 0 },
+    expect(sqlite.query(`SELECT id FROM usage_log ORDER BY id`).all()).toEqual([{ id: "d" }, { id: "e" }]);
+    expect(sqlite.query(`SELECT * FROM usage_daily ORDER BY model`).all()).toEqual([
+      { user_id: "u1", day: "2026-11-01", model: "deepseek-v4-flash", requests: 1, sessions: 0, input_tokens: 100, output_tokens: 50, cached_tokens: 10, club_charge_micro: 0, personal_charge_micro: 900, cost_micro: 0 },
+      { user_id: "u1", day: "2026-11-01", model: "glm-5.3", requests: 2, sessions: 1, input_tokens: 200, output_tokens: 100, cached_tokens: 20, club_charge_micro: 1800, personal_charge_micro: 0, cost_micro: 1200 },
+    ]);
+    // Lifetime totals are independent of the rollup.
+    expect(totals()).toEqual(before);
   });
-  expect(totals()).toEqual(before);
+
+  test("reads return the same daily rows before and after a rollup", async () => {
+    await writeDays();
+    const before = await dailyUsage(d1, { since: "2026-10-30", userId: "u1" });
+    await rollUp();
+    expect(await dailyUsage(d1, { since: "2026-10-30", userId: "u1" })).toEqual(before);
+    expect(await dailyUsage(d1, { since: "2026-10-30" })).toEqual(before);
+    expect(before.map((row) => [row.day, row.model, row.requests, row.sessions])).toEqual([
+      ["2026-11-01", "deepseek-v4-flash", 1, 0],
+      ["2026-11-01", "glm-5.3", 2, 1],
+      ["2026-11-02", "glm-5.3", 1, 1],
+      ["2026-11-08", "glm-5.3", 1, 1],
+    ]);
+    expect(await dailyUsage(d1, { since: "2026-11-02", userId: "u1" })).toHaveLength(2);
+    expect(await dailyUsage(d1, { since: "2026-10-30", userId: "someone-else" })).toEqual([]);
+  });
 });

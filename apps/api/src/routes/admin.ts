@@ -1,12 +1,13 @@
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
-import { user, usageLimit, usageLog, usageTotal } from "../db/schema";
+import { user, usageLimit, usageTotal } from "../db/schema";
 import { ApiError, decodeBody, decodeQuery, failWith } from "../http";
 import { UserSession, userAuthMiddleware } from "../middleware/user-auth";
 import { query, WorkerEnv } from "../services";
 import { upstreamKeys } from "../upstreams";
-import { addDays, centralDay, centralDaySql, centralDayStart, centralOffsetMinutes } from "../util/timezone";
+import { dailyUsage } from "../usage-aggregates";
+import { addDays, centralDay, centralOffsetMinutes } from "../util/timezone";
 
 export type User = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "role"> & {
   fiveHourMicro: number | null;
@@ -34,7 +35,6 @@ export interface TokenLeaderboard {
 export interface AdminUsage {
   days: number;
   perUser: { userId: string; name: string; email: string; clubChargeMicro: number; personalChargeMicro: number; costMicro: number; sessions: number }[];
-  // Club billing only.
   perModel: { model: string; requests: number; inputTokens: number; outputTokens: number; chargeMicro: number; costMicro: number }[];
   history: { day: string; model: string; tokens: number; chargeMicro: number; costMicro: number }[];
   // Central time's current UTC offset in minutes east, for laying out the chart's days.
@@ -83,59 +83,55 @@ export const adminRoutes = Layer.mergeAll(
     return HttpServerResponse.jsonUnsafe(users satisfies User[]);
   })),
 
-  // Cross-user usage from the logs, powering the admin graphs. The `days`
-  // query parameter selects the last 7 or 30 Central days.
+  // Cross-user usage over the last 7 or 30 Central days, powering the admin
+  // graphs. One read of the daily totals feeds every breakdown.
   HttpRouter.add("GET", "/api/admin/usage", Effect.fn("adminUsage")(function* () {
     const params = yield* decodeQuery(UsageQuery);
     const days = params.days === "7" ? 7 : 30;
     const now = Date.now();
-    const since = new Date(centralDayStart(addDays(centralDay(now), -(days - 1))));
-    const inRange = gte(usageLog.createdAt, since);
-    const charge = (billed: "club" | "personal") => sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.billed} = ${billed} THEN ${usageLog.chargeMicro} ELSE 0 END), 0)`;
-
-    const [perUser, perModel, history] = yield* query((db) => Promise.all([
-      db.select({
-        userId: usageLog.userId,
-        name: user.name,
-        email: user.email,
-        clubChargeMicro: charge("club"),
-        personalChargeMicro: charge("personal"),
-        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
-        sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
-      })
-        .from(usageLog)
-        .innerJoin(user, eq(user.id, usageLog.userId))
-        .where(inRange)
-        .groupBy(usageLog.userId, user.name, user.email)
-        .orderBy(desc(charge("club"))),
-      // Club billing only.
-      db.select({
-        model: usageLog.model,
-        requests: sql<number>`COUNT(*)`,
-        inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
-        outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
-        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
-        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
-      })
-        .from(usageLog)
-        .where(and(inRange, eq(usageLog.billed, "club")))
-        .groupBy(usageLog.model)
-        .orderBy(desc(sql`SUM(${usageLog.chargeMicro})`)),
-      // Every user and key. Input tokens already include cached tokens.
-      db.select({
-        day: centralDaySql(usageLog.createdAt),
-        model: usageLog.model,
-        tokens: sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`,
-        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
-        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
-      })
-        .from(usageLog)
-        .where(inRange)
-        .groupBy(sql`1`, usageLog.model)
-        .orderBy(sql`1`, usageLog.model),
+    const [rows, users] = yield* query((db) => Promise.all([
+      dailyUsage(db.$client, { since: addDays(centralDay(now), -(days - 1)) }),
+      db.select({ id: user.id, name: user.name, email: user.email }).from(user),
     ]));
+    const userById = new Map(users.map((row) => [row.id, row]));
 
-    return HttpServerResponse.jsonUnsafe({ days, perUser, perModel, history, tzOffset: centralOffsetMinutes(now) } satisfies AdminUsage);
+    const perUser = new Map<string, AdminUsage["perUser"][number]>();
+    const perModel = new Map<string, AdminUsage["perModel"][number]>();
+    const history = new Map<string, AdminUsage["history"][number]>();
+    for (const row of rows) {
+      const charge = row.clubChargeMicro + row.personalChargeMicro;
+      const account = userById.get(row.userId);
+      if (account) {
+        const entry = perUser.get(row.userId) ?? { userId: row.userId, name: account.name, email: account.email, clubChargeMicro: 0, personalChargeMicro: 0, costMicro: 0, sessions: 0 };
+        entry.clubChargeMicro += row.clubChargeMicro;
+        entry.personalChargeMicro += row.personalChargeMicro;
+        entry.costMicro += row.costMicro;
+        entry.sessions += row.sessions;
+        perUser.set(row.userId, entry);
+      }
+      const model = perModel.get(row.model) ?? { model: row.model, requests: 0, inputTokens: 0, outputTokens: 0, chargeMicro: 0, costMicro: 0 };
+      model.requests += row.requests;
+      model.inputTokens += row.inputTokens;
+      model.outputTokens += row.outputTokens;
+      model.chargeMicro += charge;
+      model.costMicro += row.costMicro;
+      perModel.set(row.model, model);
+      // Input tokens already include cached tokens.
+      const key = `${row.day}\u0000${row.model}`;
+      const point = history.get(key) ?? { day: row.day, model: row.model, tokens: 0, chargeMicro: 0, costMicro: 0 };
+      point.tokens += row.inputTokens + row.outputTokens;
+      point.chargeMicro += charge;
+      point.costMicro += row.costMicro;
+      history.set(key, point);
+    }
+
+    return HttpServerResponse.jsonUnsafe({
+      days,
+      perUser: [...perUser.values()].sort((a, b) => b.clubChargeMicro - a.clubChargeMicro),
+      perModel: [...perModel.values()].sort((a, b) => b.chargeMicro - a.chargeMicro),
+      history: [...history.values()],
+      tzOffset: centralOffsetMinutes(now),
+    } satisfies AdminUsage);
   })),
 
   // Token leaderboard: lifetime (or windowed) token totals per user, ranked
@@ -146,44 +142,28 @@ export const adminRoutes = Layer.mergeAll(
     const { days: range } = yield* decodeQuery(UsageQuery);
     const days = range === "7" ? 7 : range === "30" ? 30 : null;
 
-    const entries = yield* query((db) => {
-      if (days === null) {
-        const totalTokens = sql<number>`SUM(${usageTotal.inputTokens} + ${usageTotal.outputTokens})`;
-        return db.select({
-          userId: user.id,
-          name: user.name,
-          email: user.email,
-          inputTokens: sql<number>`SUM(${usageTotal.inputTokens})`,
-          outputTokens: sql<number>`SUM(${usageTotal.outputTokens})`,
-          totalTokens,
-          requests: sql<number>`SUM(${usageTotal.requests})`,
-          sessions: sql<number>`SUM(${usageTotal.sessions})`,
-        })
-          .from(usageTotal)
-          .innerJoin(user, eq(user.id, usageTotal.userId))
-          .groupBy(user.id, user.name, user.email)
-          .orderBy(desc(totalTokens), asc(user.email))
-          .limit(100);
-      }
-      const since = new Date(centralDayStart(addDays(centralDay(Date.now()), -(days - 1))));
-      const totalTokens = sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`;
-      return db.select({
-        userId: user.id,
-        name: user.name,
-        email: user.email,
-        inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
-        outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
-        totalTokens,
-        requests: sql<number>`COUNT(*)`,
-        sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
-      })
-        .from(usageLog)
-        .innerJoin(user, eq(user.id, usageLog.userId))
-        .where(gte(usageLog.createdAt, since))
-        .groupBy(user.id, user.name, user.email)
-        .orderBy(desc(totalTokens), asc(user.email))
-        .limit(100);
-    });
+    const [rows, users] = yield* query((db) => Promise.all([
+      days === null
+        ? db.select().from(usageTotal)
+        : dailyUsage(db.$client, { since: addDays(centralDay(Date.now()), -(days - 1)) }),
+      db.select({ id: user.id, name: user.name, email: user.email }).from(user),
+    ]));
+    const userById = new Map(users.map((row) => [row.id, row]));
+    const byUser = new Map<string, TokenLeaderboard["entries"][number]>();
+    for (const row of rows) {
+      const account = userById.get(row.userId);
+      if (!account) continue;
+      const entry = byUser.get(row.userId) ?? { userId: row.userId, name: account.name, email: account.email, inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0, sessions: 0 };
+      entry.inputTokens += row.inputTokens;
+      entry.outputTokens += row.outputTokens;
+      entry.totalTokens += row.inputTokens + row.outputTokens;
+      entry.requests += row.requests;
+      entry.sessions += row.sessions;
+      byUser.set(row.userId, entry);
+    }
+    const entries = [...byUser.values()]
+      .sort((a, b) => b.totalTokens - a.totalTokens || a.email.localeCompare(b.email))
+      .slice(0, 100);
 
     return HttpServerResponse.jsonUnsafe({
       days: days ?? 0,

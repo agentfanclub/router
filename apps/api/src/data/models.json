@@ -22,7 +22,10 @@
       "output": [
         "text"
       ]
-    }
+    },
+    "upstreams": [
+      "lumen"
+    ]
   },
   "deepseek-v4.1-flash": {
     "id": "deepseek-v4.1-flash",
@@ -48,7 +51,10 @@
       "output": [
         "text"
       ]
-    }
+    },
+    "upstreams": [
+      "lumen"
+    ]
   },
   "glm-5.3": {
     "id": "glm-5.3",
@@ -73,7 +79,10 @@
       "output": [
         "text"
       ]
-    }
+    },
+    "upstreams": [
+      "lumen"
+    ]
   },
   "sarvam-105b": {
     "id": "sarvam-105b",
@@ -98,7 +107,10 @@
       "output": [
         "text"
       ]
-    }
+    },
+    "upstreams": [
+      "sarvam"
+    ]
   },
   "qwen3.8-flash": {
     "id": "qwen3.8-flash",
@@ -124,6 +136,9 @@
       "output": [
         "text"
       ]
-    }
+    },
+    "upstreams": [
+      "lumen"
+    ]
   }
 }

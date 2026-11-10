@@ -1,426 +1,342 @@
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import models from "../data/models.json";
 import { byokKey } from "../db/schema";
-import { type AdmitResult, type UpstreamRoute } from "../do/user-usage";
+import type { DenyReason, UsageSnapshot } from "../do/user-usage";
+import { OpenAiError } from "../http";
 import { ApiKeyIdentity, inferenceKeyAuth } from "../middleware/api-key-auth";
+import { query, UsageCoordinator, WorkerEnv, WorkerExecution } from "../services";
+import { catalog, upstreamKeys, upstreams, type CatalogModel, type ModelCost, type UpstreamRoute } from "../upstreams";
 import { decryptSecret } from "../util/secret-box";
+import { usageCaptureTransform } from "../util/sse-usage";
+import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
 import {
   computeCostMicro,
   deriveSessionId,
+  estimateCostMicro,
   parseOpenAiUsage,
   type ParsedUsage,
   type RoutePrice,
 } from "../util/usage";
-import { usageCaptureTransform } from "../util/sse-usage";
-import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
-import { WorkerEnv, WorkerExecution } from "../worker-env";
 
-const LUMEN_CHAT_URL = "https://lumen.ncsa.illinois.edu/v1/chat/completions";
+type Status = "ok" | "error" | "aborted";
 
-// Sarvam is Bearer-authenticated and OpenAI-compatible for chat, streaming, and
-// usage reporting, but it thinks unless told how hard, and reasoning tokens
-// count as output, so the router always sets an explicit effort. Its
-// max_tokens ceiling depends on the Sarvam plan; the catalog's lowest plan
-// bound keeps a large client request from failing outright.
-const SARVAM_CHAT_URL = "https://api.sarvam.ai/v1/chat/completions";
-const SARVAM_MAX_OUTPUT_TOKENS = 4096;
-const SARVAM_REASONING_EFFORT = "medium";
+// Upstream statuses meaning "this account cannot serve right now". The next
+// route is tried before the client sees anything.
+const FAILOVER_STATUSES = [401, 402, 429];
 
-type CatalogModel = (typeof models)[keyof typeof models];
-const catalog = models as unknown as Record<string, CatalogModel>;
+// Club keys tried per route before failing over to the next one.
+const KEYS_PER_ROUTE = 3;
 
-interface ChatBody {
-  model: string;
-  messages: unknown[];
-  stream?: boolean;
-  max_tokens?: number;
-  max_completion_tokens?: number;
-  stream_options?: { include_usage?: boolean } | null;
+// The fields the router reads. Everything else is forwarded untouched.
+const ChatFields = Schema.Struct({
+  model: Schema.String,
+  messages: Schema.Array(Schema.Unknown),
+});
+
+const chatError = (status: number, code: string, message: string, requestId?: string) => new OpenAiError({
+  status,
+  code,
+  message,
+  type: status === 400 || status === 404 ? "invalid_request_error" : undefined,
+  headers: requestId ? { "x-router-request-id": requestId } : undefined,
+});
+
+const parseChatRequest = (text: string) => Effect.try(() => JSON.parse(text) as unknown).pipe(
+  Effect.flatMap((raw) => Schema.decodeUnknownEffect(ChatFields)(raw).pipe(
+    Effect.map((fields) => ({ fields, raw: raw as Record<string, unknown> })),
+  )),
+  Effect.map(({ fields, raw }) => {
+    const maxTokens = raw.max_tokens ?? raw.max_completion_tokens;
+    const streamOptions = raw.stream_options as { include_usage?: unknown } | null | undefined;
+    return {
+      raw,
+      model: fields.model,
+      messages: fields.messages,
+      stream: raw.stream === true,
+      maxTokens: typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : undefined,
+      clientWantsUsage: streamOptions?.include_usage === true,
+    };
+  }),
+  Effect.mapError(() => chatError(400, "invalid_request", "The request body must be a JSON chat completion with model and messages.")),
+);
+
+const toPrice = (cost: ModelCost): RoutePrice => ({ input: cost.input, output: cost.output, cacheRead: cost.cache_read });
+
+// What the club pays for a request on `route`. The user's own key costs the club nothing.
+function upstreamPrice(model: CatalogModel, route: UpstreamRoute): RoutePrice {
+  if (route === "byok") return { input: 0, output: 0, cacheRead: 0 };
+  return toPrice(model.upstream_cost?.[route] ?? model.cost);
 }
 
-function parseChatBody(raw: string): ChatBody | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const record = parsed as Record<string, unknown>;
-  if (typeof record.model !== "string" || !Array.isArray(record.messages)) return null;
-  return {
-    model: record.model,
-    messages: record.messages,
-    stream: record.stream === true,
-    max_tokens: typeof record.max_tokens === "number" ? record.max_tokens : undefined,
-    max_completion_tokens: typeof record.max_completion_tokens === "number" ? record.max_completion_tokens : undefined,
-    stream_options:
-      record.stream_options && typeof record.stream_options === "object"
-        ? record.stream_options as ChatBody["stream_options"]
-        : null,
-  };
-}
-
-function modelPrice(entry: CatalogModel): RoutePrice {
-  return { input: entry.cost.input, output: entry.cost.output, cacheRead: entry.cost.cache_read };
-}
-
-function chatError(message: string, code: string, status: 400 | 404 | 429 | 502 | 503, requestId?: string) {
-  return HttpServerResponse.jsonUnsafe({
-    error: { message, type: status === 429 ? "rate_limit_error" : "server_error", code, param: null },
-  }, { status, headers: requestId ? { "x-router-request-id": requestId } : undefined });
-}
-
-const handleRequest = Effect.gen(function* () {
+const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerRequest.HttpServerRequest) {
   const env = yield* WorkerEnv;
   const execution = yield* WorkerExecution;
   const identity = yield* ApiKeyIdentity;
-  const request = yield* HttpServerRequest.HttpServerRequest;
+  const usage = yield* UsageCoordinator;
+  const { signal } = yield* HttpServerRequest.toWeb(request);
 
-  const webRequest = yield* HttpServerRequest.toWeb(request);
-  const rawBody = yield* Effect.tryPromise(() => webRequest.text()).pipe(
-    Effect.orElseSucceed(() => null),
+  const text = yield* request.text.pipe(
+    Effect.mapError(() => chatError(400, "invalid_request", "Unable to read the request body.")),
   );
-  if (rawBody === null) {
-    return chatError("Unable to read the request body.", "invalid_request", 400);
+  const chat = yield* parseChatRequest(text);
+  const model = catalog[chat.model];
+  if (!model) {
+    return yield* chatError(404, "model_not_found", `Unknown model '${chat.model}'. Available models: ${Object.keys(catalog).join(", ")}.`);
   }
 
-  const body = parseChatBody(rawBody);
-  if (!body) {
-    return chatError("The request body must be a JSON chat completion with model and messages.", "invalid_request", 400);
-  }
-
-  const entry = catalog[body.model];
-  if (!entry) {
-    return chatError(
-      `Unknown model '${body.model}'. Available models: ${Object.keys(catalog).join(", ")}.`,
-      "model_not_found",
-      404,
-    );
-  }
-
-  // Derive the grouping and cache-affinity tag on the server, independent
-  // of client-supplied session headers.
-  const sessionId = deriveSessionId(body.messages);
-
-  const price = modelPrice(entry);
-  const requestedMaxOutput = body.max_tokens ?? body.max_completion_tokens;
-  // A model is served by exactly one club API: Sarvam-served models only exist
-  // on Sarvam's API, and every other catalog model is on Lumen. An unset key
-  // makes that upstream unavailable, which admission has already accounted for.
-  const isSarvamModel = body.model.startsWith("sarvam-");
-  const clubCredential = isSarvamModel ? env.SARVAM_API_KEY ?? null : env.LUMEN_API_KEY ?? null;
-
-  // Sarvam enforces its output ceiling by plan, so requests are bounded to the
-  // lowest plan's limit. The reservation trusts the bound the upstream honors.
-  const outputLimit = isSarvamModel
-    ? Math.min(entry.limit.output, SARVAM_MAX_OUTPUT_TOKENS)
-    : entry.limit.output;
-  const maxOutputTokens = requestedMaxOutput && requestedMaxOutput > 0
-    ? Math.min(requestedMaxOutput, outputLimit)
-    : outputLimit;
-  const inputEstimateTokens = Math.ceil(rawBody.length / 4);
+  // Derived on the server so grouping and cache affinity do not depend on
+  // client-supplied session headers.
+  const sessionId = deriveSessionId(chat.messages);
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
-  const logContext = { requestId, model: body.model, stream: body.stream === true };
+  const logContext = { requestId, model: chat.model, stream: chat.stream };
+  // What the user pays. Reservations and usage caps use it.
+  const price = toPrice(model.cost);
 
-  const stub = env.USER_USAGE.get(env.USER_USAGE.idFromName(identity.userId));
-  // A personal Lumen key is a fallback upstream: it can serve when the club
-  // allowance is exhausted or the shared Lumen account cannot. The club key
-  // being unset simply marks the club upstream unavailable.
-  const byokAvailable = identity.byok !== null && Boolean(env.BYOK_ENCRYPTION_KEY);
-  const admit = yield* Effect.tryPromise(() => stub.fetch("https://usage/admit", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      requestId,
-      sessionId,
-      userId: identity.userId,
-      apiKeyId: identity.keyId,
-      model: body.model,
-      createdAt: startedAt,
-      inputEstimateTokens,
-      maxOutputTokens,
-      limits: identity.limits,
-      upstreams: {
-        clubLumen: env.LUMEN_API_KEY ? "ok" : "dry",
-        byok: byokAvailable,
-        opencodeGo: false,
-        sarvam: Boolean(env.SARVAM_API_KEY),
-      },
-      // Sarvam prices its models itself; Lumen prices the rest.
-      sarvamPriced: isSarvamModel,
-      prices: { clubLumen: price, sarvam: isSarvamModel ? price : undefined },
-    }),
-  })).pipe(
-    Effect.orElseSucceed(() => null),
-  );
-  if (!admit || !admit.ok) {
-    console.error({ event: "inference_admission_error", ...logContext, coordinatorStatus: admit?.status ?? null });
-    // Fail closed: if the usage coordinator is unreachable, serving anyway
-    // would bypass every limit.
-    return chatError("Unable to check usage limits right now. Try again.", "usage_unavailable", 503, requestId);
+  // Club upstreams serving the model with a configured key, in priority
+  // order, then the user's own key when it can serve the model.
+  const routes: UpstreamRoute[] = model.upstreams.filter((id) => upstreamKeys(env, id).length > 0);
+  if (identity.byok && env.BYOK_ENCRYPTION_KEY && model.upstreams.includes("lumen")) routes.push("byok");
+  if (routes.length === 0) {
+    console.error({ event: "inference_no_upstream", ...logContext });
+    return yield* chatError(503, "no_upstream", "No upstream is currently available to serve this request.", requestId);
   }
-  const decision: AdmitResult = yield* Effect.promise(() => admit.json<AdmitResult>());
 
-  // The upstream that actually serves this request. It starts as the route
-  // the coordinator chose and can flip to the user's personal key mid-request
-  // on failover, so settle and logging read it at completion time.
-  let route: UpstreamRoute = decision.decision === "admit" ? decision.route : "club-lumen";
-
-  const db = drizzle(env.DB);
+  const decision = yield* usage.admit({
+    requestId,
+    sessionId,
+    userId: identity.userId,
+    apiKeyId: identity.keyId,
+    model: chat.model,
+    createdAt: startedAt,
+    routes,
+    reserveMicro: estimateCostMicro({
+      inputEstimateTokens: Math.ceil(text.length / 4),
+      maxOutputTokens: Math.min(chat.maxTokens ?? model.limit.output, model.limit.output),
+    }, price),
+    limits: identity.limits,
+  }).pipe(Effect.mapError((error) => {
+    console.error({ event: "inference_admission_error", ...logContext, errorName: errorName(error.cause) });
+    // Fail closed: serving without the coordinator would bypass every limit.
+    return chatError(503, "usage_unavailable", "Unable to check usage limits right now. Try again.", requestId);
+  }));
   if (decision.decision === "deny") {
     console.info({ event: "inference_denied", ...logContext, reason: decision.reason });
-    if (decision.reason === "no_upstream") {
-      return chatError("No upstream is currently available to serve this request. Try again soon.", "no_upstream", 503, requestId);
-    }
-    const window = decision.reason === "weekly_cap" ? decision.snapshot.weekly : decision.snapshot.fiveHour;
-    const label = decision.reason === "weekly_cap" ? "Weekly" : "Five-hour";
-    const message = `${label} usage allowance reached. It resets in ${formatDuration(window.resetsInMs)}.`;
-    const publicWindow = (value: typeof window) => ({
-      usedPercent: value.limitMicro > 0 ? value.usedMicro / value.limitMicro * 100 : 100,
-      resetsInMs: value.resetsInMs,
-    });
-    return HttpServerResponse.jsonUnsafe({
-      error: { message, type: "rate_limit_error", code: "usage_limit_reached", param: null },
-      usage: { fiveHour: publicWindow(decision.snapshot.fiveHour), weekly: publicWindow(decision.snapshot.weekly) },
-    }, {
-      status: 429,
-      headers: { "retry-after": String(Math.max(1, Math.ceil(window.resetsInMs / 1000))), "x-router-request-id": requestId },
-    });
+    return limitReached(decision.reason, decision.snapshot, requestId);
   }
 
-  // Reservations bound in-flight usage. Only reported token usage becomes spend.
-  // An interrupted response without usage has an unknown cost, recorded as zero.
-  const finalize = async (args: { status: "ok" | "error" | "aborted"; usage: ParsedUsage | null; durationMs: number }) => {
-    console.info({ event: "inference_finished", ...logContext, route, status: args.status, durationMs: args.durationMs });
-    const costMicro = args.usage !== null
-      ? computeCostMicro(args.usage, price)
-      : 0;
-    const settlement = async () => {
-      const response = await stub.fetch("https://usage/settle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          requestId, userId: identity.userId, route, costMicro, limits: identity.limits,
-          usage: args.usage,
-          estimated: args.usage === null && args.status !== "error",
-          status: args.status,
-          durationMs: args.durationMs,
-        }),
-      });
-      if (!response.ok) throw new Error(`Usage settlement failed: ${response.status}`);
-    };
-    // A terminal stream event can cause the client to close its connection.
-    // Keep the settlement alive independently of that response's lifetime.
-    const pending = settlement().catch(() => settlement()).catch((error: unknown) => {
-      console.error({ event: "inference_settlement_error", ...logContext, route });
-      throw error;
+  // The route that served the request. Failover can change it, so settlement
+  // reads it at completion time.
+  let route = decision.route;
+
+  // Only reported usage becomes spend. An interrupted response without usage
+  // has an unknown cost and is recorded as zero. Settlement runs detached so
+  // it outlives the client connection, which can close as soon as it sees
+  // the terminal stream event.
+  const finish = (status: Status, parsed: ParsedUsage | null): Promise<void> => {
+    const durationMs = Date.now() - startedAt;
+    console.info({ event: "inference_finished", ...logContext, route, status, durationMs });
+    const settle = usage.settle(identity.userId, {
+      requestId, route, status, durationMs,
+      usage: parsed,
+      chargeMicro: parsed ? computeCostMicro(parsed, price) : 0,
+      costMicro: parsed ? computeCostMicro(parsed, upstreamPrice(model, route)) : 0,
+      limits: identity.limits,
     });
+    const pending = Effect.runPromise(settle.pipe(
+      Effect.retry({ times: 1 }),
+      Effect.tapError((error) => Effect.sync(() => {
+        console.error({ event: "inference_settlement_error", ...logContext, route, errorName: errorName(error.cause) });
+      })),
+      Effect.ignore,
+    ));
     execution.waitUntil(pending);
-    await pending;
+    return pending;
   };
+  const settleNow = (status: Status, parsed: ParsedUsage | null = null) => Effect.promise(() => finish(status, parsed));
 
-  // Ask the upstream for usage data on streams even when the client did not,
-  // so real token counts back the cost accounting. The injected final usage
-  // chunk is hidden from clients that did not request it.
-  const clientWantsUsage = body.stream_options?.include_usage === true;
-  const injectUsage = (raw: string) => JSON.stringify({ ...JSON.parse(raw), stream_options: { include_usage: true } });
-  const upstreamBodyText = body.stream && !clientWantsUsage ? injectUsage(rawBody) : rawBody;
+  let byokUnreadable = false;
 
-  // Sarvam gets the router's reasoning effort and a plan-safe output bound,
-  // leaving a client's own effort as-is. Streams always ask for usage: the
-  // effective bound has to be fixed before admission, and Sarvam's usage chunk
-  // is what prices the request.
-  const sarvamBodyText = (() => {
-    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-    delete parsed.max_completion_tokens;
-    if (body.stream && !clientWantsUsage) parsed.stream_options = { include_usage: true };
-    const maxTokens = parsed.max_tokens ?? body.max_completion_tokens;
-    if (typeof maxTokens === "number" && maxTokens > SARVAM_MAX_OUTPUT_TOKENS) {
-      parsed.max_tokens = SARVAM_MAX_OUTPUT_TOKENS;
+  // The next key to try on a route, or null when the route has none left.
+  const nextKey = Effect.fn(function* (candidate: UpstreamRoute, tried: ReadonlySet<string>) {
+    if (candidate === "byok") {
+      if (tried.size > 0) return null;
+      const key = yield* Effect.tryPromise(() => decryptSecret(identity.byok!.ciphertext, env.BYOK_ENCRYPTION_KEY!)).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      byokUnreadable ||= key === null;
+      return key;
     }
-    if (parsed.reasoning_effort === undefined) parsed.reasoning_effort = SARVAM_REASONING_EFFORT;
-    return JSON.stringify(parsed);
-  })();
+    // A random untried key. Random choice evens out across per-key rate
+    // limits without tracking usage.
+    const keys = upstreamKeys(env, candidate).filter((key) => !tried.has(key));
+    return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)]! : null;
+  });
 
   let attempt = 0;
-  const sendUpstream = async (credential: string, attemptRoute: UpstreamRoute) => {
-    const attemptNumber = ++attempt;
+  const send = (candidate: UpstreamRoute, key: string) => {
+    const upstream = upstreams[candidate === "byok" ? "lumen" : candidate];
+    const body = { ...chat.raw };
+    // Streams always ask for usage so real token counts back the accounting.
+    // The extra usage chunk is hidden from clients that did not ask for it.
+    if (chat.stream) body.stream_options = { ...(body.stream_options as object | undefined), include_usage: true };
+    upstream.prepareBody?.(body);
+
+    const attemptContext = { ...logContext, route: candidate, attempt: ++attempt };
     const attemptStartedAt = Date.now();
-    const attemptContext = { ...logContext, route: attemptRoute, attempt: attemptNumber };
     console.info({ event: "upstream_started", ...attemptContext });
-    try {
-      const response = await fetch(isSarvamModel ? SARVAM_CHAT_URL : LUMEN_CHAT_URL, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": webRequest.headers.get("content-type") ?? "application/json",
-          accept: request.headers.accept ?? "application/json",
-          "x-opencode-session": sessionId,
-        },
-        body: isSarvamModel ? sarvamBodyText : upstreamBodyText,
-        signal: webRequest.signal,
-        redirect: "manual",
-      });
-      console.info({
+    return Effect.tryPromise(() => fetch(upstream.url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+        accept: request.headers.accept ?? "application/json",
+        "x-opencode-session": sessionId,
+      },
+      body: JSON.stringify(body),
+      signal,
+      redirect: "manual",
+    })).pipe(
+      Effect.tap((response) => Effect.sync(() => console.info({
         event: "upstream_response", ...attemptContext,
         upstreamStatus: response.status,
         headersMs: Date.now() - attemptStartedAt,
         upstreamRay: diagnosticIdentifier(response.headers.get("cf-ray")),
         upstreamRequestId: diagnosticIdentifier(response.headers.get("x-request-id")),
-      });
-      return response;
-    } catch (error) {
-      console.error({
+      }))),
+      Effect.tapError((error) => Effect.sync(() => console.error({
         event: "upstream_fetch_error", ...attemptContext,
         elapsedMs: Date.now() - attemptStartedAt,
-        clientAborted: webRequest.signal.aborted,
-        errorName: error instanceof Error ? diagnosticIdentifier(error.name) : null,
-      });
-      throw error;
-    }
+        clientAborted: signal.aborted,
+        errorName: errorName(error.cause),
+      }))),
+      Effect.orElseSucceed(() => null),
+    );
   };
 
-  const personalCredential = () => identity.byok && env.BYOK_ENCRYPTION_KEY
-    ? decryptSecret(identity.byok.ciphertext, env.BYOK_ENCRYPTION_KEY)
-    : Promise.resolve(null);
-
-  // Choose the starting credential from the admitted route. The coordinator
-  // never routes to a club upstream whose key is unset or to byok without a
-  // stored key.
-  let credential: string | null = route === "byok" ? null : clubCredential;
-  if (route === "byok") {
-    credential = yield* Effect.promise(personalCredential);
-    if (!credential) {
-      yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
-      return chatError("Unable to use your personal Lumen key. Re-add it from Connections.", "byok_unreadable", 502, requestId);
-    }
-  } else if (!credential) {
-    yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
-    return chatError("No upstream is currently available to serve this request.", "no_upstream", 503, requestId);
-  }
-
-  let upstream = yield* Effect.tryPromise(() => sendUpstream(credential!, route)).pipe(
-    Effect.orElseSucceed(() => null),
+  // A personal key Lumen refuses is marked invalid so later requests stop
+  // trying it.
+  const invalidateByok = query((db) => db.update(byokKey).set({ status: "invalid" }).where(eq(byokKey.id, identity.byok!.id))).pipe(
+    Effect.tapError((error) => Effect.sync(() => console.error({ event: "byok_invalidation_error", ...logContext, errorName: errorName(error.cause) }))),
+    Effect.ignore,
   );
 
+  // Start on the admitted route and fail over through the rest in priority
+  // order. A request admitted to the user's own key is over the club
+  // allowance and never falls back onto a club route.
+  const attempts = decision.route === "byok"
+    ? ["byok" as const]
+    : [decision.route, ...routes.filter((candidate) => candidate !== decision.route)];
+  // Within a club route, a refused key is followed by another random key.
+  let upstream: Response | null = null;
+  routes: for (const candidate of attempts) {
+    const tried = new Set<string>();
+    while (tried.size < KEYS_PER_ROUTE && !signal.aborted) {
+      const key = yield* nextKey(candidate, tried);
+      if (!key) break;
+      tried.add(key);
+      const response = yield* send(candidate, key);
+      // An unreachable upstream will not answer on another key either.
+      if (!response) continue routes;
+      void upstream?.body?.cancel().catch(() => { });
+      upstream = response;
+      route = candidate;
+      if (candidate === "byok" && (response.status === 401 || response.status === 403)) yield* invalidateByok;
+      if (!FAILOVER_STATUSES.includes(response.status)) break routes;
+    }
+  }
+
   if (!upstream) {
-    const aborted = webRequest.signal.aborted;
-    yield* Effect.promise(() => finalize({ status: aborted ? "aborted" : "error", usage: null, durationMs: Date.now() - startedAt }));
-    if (aborted) {
-      return HttpServerResponse.fromWeb(new Response(null, { status: 499, headers: { "x-router-request-id": requestId } }));
+    if (signal.aborted) {
+      yield* settleNow("aborted");
+      return HttpServerResponse.empty({ status: 499, headers: { "x-router-request-id": requestId } });
     }
-    console.error({ event: "upstream_unreachable", ...logContext, route });
-    return chatError(`Unable to reach ${isSarvamModel ? "Sarvam" : "Lumen"}.`, "upstream_unreachable", 502, requestId);
+    yield* settleNow("error");
+    return yield* byokUnreadable && attempts.length === 1
+      ? chatError(502, "byok_unreadable", "Unable to use your personal Lumen key. Re-add it from Connections.", requestId)
+      : chatError(502, "upstream_unreachable", "Unable to reach the upstream.", requestId);
   }
 
-  // Seamless failover: the club account cannot serve (auth, payment, or
-  // quota) while the user has a personal key — retry there immediately.
-  // The client never sees the first failure, and the club reservation is
-  // released without charge when the request settles on the personal key.
-  // Sarvam refuses requests the same way: 402 for spent credits, 401 and 429
-  // for keys and limits, so it fails over by the same rule.
-  if (route !== "byok" && byokAvailable && [401, 402, 429].includes(upstream.status)) {
-    const secret = yield* Effect.promise(personalCredential);
-    if (secret) {
-      const first = upstream;
-      const retry = yield* Effect.tryPromise(() => sendUpstream(secret, "byok")).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (retry) {
-        void first.body?.cancel().catch(() => { });
-        route = "byok";
-        upstream = retry;
-      }
+  const served = upstream;
+  const respond = (body: BodyInit | null) => {
+    const headers = new Headers(served.headers);
+    headers.set("x-router-session", sessionId);
+    headers.set("x-router-request-id", requestId);
+    return HttpServerResponse.fromWeb(new Response(body, { status: served.status, headers }));
+  };
+
+  if (!served.ok || !served.body) {
+    const errorText = yield* Effect.promise(() => served.text().catch(() => ""));
+    console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(jsonField(errorText, "error")) });
+    yield* settleNow("error");
+    return respond(errorText || null);
+  }
+
+  const isEventStream = (served.headers.get("content-type") ?? "").includes("text/event-stream");
+  if (!chat.stream || !isEventStream) {
+    const responseText = yield* Effect.tryPromise(() => served.text()).pipe(Effect.orElseSucceed(() => null));
+    if (responseText === null) {
+      console.error({ event: "upstream_body_read_error", ...logContext, route, upstreamStatus: served.status, clientAborted: signal.aborted });
+      yield* settleNow(signal.aborted ? "aborted" : "error");
+      return yield* chatError(502, "upstream_unreachable", "Unable to read the upstream response.", requestId);
     }
+    const error = jsonField(responseText, "error");
+    if (error) console.error({ event: "upstream_body_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(error) });
+    yield* settleNow(error ? "error" : "ok", parseOpenAiUsage(jsonField(responseText, "usage")));
+    return respond(responseText);
   }
 
-  // A personal key Lumen refuses is marked invalid so later requests move on
-  // to the user's next key or the club upstream instead of retrying it.
-  if (route === "byok" && identity.byok && (upstream.status === 401 || upstream.status === 403)) {
-    yield* Effect.promise(() => db
-      .update(byokKey)
-      .set({ status: "invalid" })
-      .where(eq(byokKey.id, identity.byok!.id))
-      .catch((error) => console.error("byok invalidation failed", requestId, error)),
-    );
-  }
-
-  if (!upstream.ok || !upstream.body) {
-    const errorText = yield* Effect.promise(() => upstream.text().catch(() => ""));
-    let error: unknown;
-    try { error = (JSON.parse(errorText) as { error?: unknown } | null)?.error; } catch { }
-    console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
-    yield* Effect.promise(() => finalize({ status: "error", usage: null, durationMs: Date.now() - startedAt }));
-    return HttpServerResponse.fromWeb(new Response(errorText || null, {
-      status: upstream.status,
-      headers: responseHeaders(upstream.headers, sessionId, requestId),
-    }));
-  }
-
-  // Buffered responses: read the body, pull the usage object, settle, forward.
-  const respondBuffered = (text: string) => Effect.gen(function* () {
-    let usage: ParsedUsage | null = null;
-    try {
-      usage = parseOpenAiUsage((JSON.parse(text) as { usage?: unknown }).usage);
-    } catch {
-      usage = null;
-    }
-    let hasError = false;
-    try {
-      const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
-      hasError = Boolean(error);
-      if (hasError) console.error({ event: "upstream_body_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) });
-    } catch { }
-    yield* Effect.promise(() => finalize({ status: hasError ? "error" : "ok", usage, durationMs: Date.now() - startedAt }));
-    return HttpServerResponse.fromWeb(new Response(text, {
-      status: upstream.status,
-      headers: responseHeaders(upstream.headers, sessionId, requestId),
-    }));
-  });
-
-  const isEventStream = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
-  if (!body.stream || !isEventStream) {
-    const text = yield* Effect.tryPromise(() => upstream.text()).pipe(Effect.orElseSucceed(() => null));
-    if (text === null) {
-      console.error({ event: "upstream_body_read_error", ...logContext, route, upstreamStatus: upstream.status, clientAborted: webRequest.signal.aborted });
-      yield* Effect.promise(() => finalize({ status: webRequest.signal.aborted ? "aborted" : "error", usage: null, durationMs: Date.now() - startedAt }));
-      return chatError("Unable to read the upstream response.", "upstream_unreachable", 502, requestId);
-    }
-    return yield* respondBuffered(text);
-  }
-
+  // Streams are proxied as web streams. Usage is captured on the way through
+  // and settled before the terminal events reach the client.
   const capture = usageCaptureTransform({
-    clientWantsUsage,
-    onError: (error) => console.error({ event: "upstream_stream_error", ...logContext, route, upstreamStatus: upstream.status, ...upstreamErrorFields(error) }),
-    onFinish: (status, usage) => finalize({ status, usage, durationMs: Date.now() - startedAt }),
+    clientWantsUsage: chat.clientWantsUsage,
+    onError: (error) => console.error({ event: "upstream_stream_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(error) }),
+    onFinish: finish,
   });
   const output = new TransformStream<Uint8Array, Uint8Array>();
-  // Observe the pump as well as normal stream completion. Errors and client
-  // cancellation do not necessarily invoke a transformer's flush callback.
-  const pump = upstream.body.pipeThrough(capture.transform).pipeTo(output.writable)
-    .catch(async (error: unknown) => {
-      console.error({ event: "upstream_stream_interrupted", ...logContext, route, upstreamStatus: upstream.status, clientAborted: webRequest.signal.aborted, errorName: error instanceof Error ? diagnosticIdentifier(error.name) : null });
-      await capture.finish("aborted");
-    });
+  // Errors and client cancellation do not always reach the transformer's
+  // flush, so the pump is observed too.
+  const pump = served.body.pipeThrough(capture.transform).pipeTo(output.writable).catch(async (error: unknown) => {
+    console.error({ event: "upstream_stream_interrupted", ...logContext, route, upstreamStatus: served.status, clientAborted: signal.aborted, errorName: errorName(error) });
+    await capture.finish("aborted");
+  });
   execution.waitUntil(pump);
-  const piped = output.readable;
-
-  return HttpServerResponse.fromWeb(new Response(piped, {
-    status: upstream.status,
-    headers: responseHeaders(upstream.headers, sessionId, requestId),
-  }));
+  return respond(output.readable);
 });
 
-function responseHeaders(upstream: Headers, sessionId: string, requestId: string): Headers {
-  const headers = new Headers(upstream);
-  headers.set("x-router-session", sessionId);
-  headers.set("x-router-request-id", requestId);
-  return headers;
+function limitReached(reason: DenyReason, snapshot: UsageSnapshot, requestId: string) {
+  const window = reason === "weekly_cap" ? snapshot.weekly : snapshot.fiveHour;
+  const label = reason === "weekly_cap" ? "Weekly" : "Five-hour";
+  const publicWindow = (value: typeof window) => ({
+    usedPercent: value.limitMicro > 0 ? value.usedMicro / value.limitMicro * 100 : 100,
+    resetsInMs: value.resetsInMs,
+  });
+  return HttpServerResponse.jsonUnsafe({
+    error: {
+      message: `${label} usage allowance reached. It resets in ${formatDuration(window.resetsInMs)}.`,
+      type: "rate_limit_error",
+      code: "usage_limit_reached",
+      param: null,
+    },
+    usage: { fiveHour: publicWindow(snapshot.fiveHour), weekly: publicWindow(snapshot.weekly) },
+  }, {
+    status: 429,
+    headers: { "retry-after": String(Math.max(1, Math.ceil(window.resetsInMs / 1000))), "x-router-request-id": requestId },
+  });
+}
+
+function jsonField(text: string, field: string): unknown {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function errorName(error: unknown): string | null {
+  return error instanceof Error ? diagnosticIdentifier(error.name) : null;
 }
 
 function formatDuration(ms: number): string {
@@ -432,6 +348,6 @@ function formatDuration(ms: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-export const inferenceRoutes = HttpRouter.add("POST", "/inference/v1/chat/completions", handleRequest).pipe(
+export const inferenceRoutes = HttpRouter.add("POST", "/inference/v1/chat/completions", handleChat).pipe(
   Layer.provide(inferenceKeyAuth),
 );

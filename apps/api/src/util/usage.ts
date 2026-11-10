@@ -112,8 +112,3 @@ export function deriveSessionId(messages: unknown): string {
   const anchor = firstUser ? `${system}\u0000${firstUser}` : (system || fallback || crypto.randomUUID());
   return `ses_${createHash("sha256").update(anchor).digest("hex").slice(0, 16)}`;
 }
-
-// Older router tags were bare hashes. OpenCode's existing IDs stay unchanged.
-export function normalizeSessionId(sessionId: string): string {
-  return /^[0-9a-f]{16}$/.test(sessionId) ? `ses_${sessionId}` : sessionId;
-}

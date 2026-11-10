@@ -1,5 +1,5 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
-import { DailyUsage } from "../components/daily-usage";
+import { DailyUsage, type ChartUnit } from "../components/daily-usage";
 import { useEffect, useState } from "react";
 import { getSession } from "../lib/session";
 import { getLumenUsage, listUsers } from "../lib/admin";
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/_dashboard/admin")({
 function Page() {
   const { users, lumenUsage: lumenResult, adminUsage } = Route.useLoaderData();
   const [days, setDays] = useState(30);
-  const [unit, setUnit] = useState<"coins" | "tokens">("coins");
+  const [unit, setUnit] = useState<ChartUnit>("charge");
   const [adminResult, setAdminResult] = useState(adminUsage);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -98,22 +98,22 @@ function Page() {
         {loading ? <p role="status" className="mt-4 text-sm text-neutral-500">Loading usage…</p> : adminResult.usage ? (
           <>
             <DailyUsage
-              history={adminResult.usage.history.map((row) => ({ day: row.day, model: row.model, value: unit === "coins" ? row.costMicro / 1_000_000 : row.tokens }))}
+              history={adminResult.usage.history.map((row) => ({ day: row.day, model: row.model, value: unit === "tokens" ? row.tokens : (unit === "charge" ? row.chargeMicro : row.costMicro) / 1_000_000 }))}
               models={[...new Set(adminResult.usage.history.map((row) => row.model))]}
               days={days}
               onDaysChange={setDays}
               unit={unit}
               onUnitChange={setUnit}
               tzOffset={adminResult.usage.tzOffset}
-              title={unit === "coins" ? "Daily cost in coins" : "Daily token usage"}
+              title={unit === "charge" ? "Daily charges in coins" : unit === "cost" ? "Daily upstream cost in coins" : "Daily token usage"}
               description="Total usage across all users, including club and personal keys"
             />
-            <DataTable variant="users" minWidth={720} caption="Users with their roles, spend, and usage limits." className="mt-6">
+            <DataTable variant="users" minWidth={760} caption="Users with their roles, spend, and usage limits." className="mt-6">
               <TableHead>
                 <Th pad="start" className="px-5">Name</Th>
                 <Th>Email</Th>
                 <Th>Role</Th>
-                <Th>Spend</Th>
+                <Th title="Charged at router prices, and what upstreams charged the club">Charged / our cost</Th>
                 <Th pad="end" className="px-5">Limits (5h / week)</Th>
               </TableHead>
               <TableBody
@@ -133,10 +133,11 @@ function Page() {
                       <Td className="whitespace-nowrap tabular-nums">
                         {spend
                           ? <>
-                              <span className="text-neutral-800">{formatUsdMicro(spend.clubMicro)}</span>
-                              {spend.personalMicro > 0 && (
-                                <span className="text-neutral-400" title="Spend on the user's personal Lumen key">
-                                  {" "}+ {formatUsdMicro(spend.personalMicro)} personal
+                              <span className="text-neutral-800">{formatUsdMicro(spend.clubChargeMicro)}</span>
+                              <span className="text-neutral-400" title="What upstreams charged the club"> / {formatUsdMicro(spend.costMicro)}</span>
+                              {spend.personalChargeMicro > 0 && (
+                                <span className="block text-xs text-neutral-400" title="Usage on the user's personal Lumen key, at router prices">
+                                  + {formatUsdMicro(spend.personalChargeMicro)} personal
                                 </span>
                               )}
                               <span className="block text-xs text-neutral-400">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
@@ -157,24 +158,26 @@ function Page() {
             </DataTable>
 
             {adminResult.usage.perModel.length > 0 && (
-              <DataTable variant="models-usage" minWidth={560} caption="Spend per model over the selected range." className="mt-6">
+              <DataTable variant="models-usage" minWidth={640} caption="Charges at router prices and upstream cost per model over the selected range." className="mt-6">
                 <TableHead>
                   <Th pad="start" className="px-5">Model</Th>
                   <Th>Requests</Th>
                   <Th>Input tokens</Th>
                   <Th>Output tokens</Th>
-                  <Th pad="end" className="px-5">Spend</Th>
+                  <Th>Charged</Th>
+                  <Th pad="end" className="px-5">Our cost</Th>
                 </TableHead>
                 <TableBody
                   rows={adminResult.usage.perModel}
                   rowKey={(row) => row.model}
-                  columns={5}
+                  columns={6}
                   renderRow={(row) => (
                     <>
                       <Td pad="start" className="truncate px-5 text-neutral-800" title={row.model}>{row.model}</Td>
                       <Td className="tabular-nums">{row.requests.toLocaleString("en-US")}</Td>
                       <Td className="tabular-nums">{row.inputTokens.toLocaleString("en-US")}</Td>
                       <Td className="tabular-nums">{row.outputTokens.toLocaleString("en-US")}</Td>
+                      <Td className="whitespace-nowrap tabular-nums">{formatUsdMicro(row.chargeMicro)}</Td>
                       <Td pad="end" className="whitespace-nowrap px-5 tabular-nums">{formatUsdMicro(row.costMicro)}</Td>
                     </>
                   )}

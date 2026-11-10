@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { Context, Effect } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { createAuth } from "../auth";
+import { HttpRouter, HttpServerRequest } from "effect/http";
 import { apiKey, usageLimit } from "../db/schema";
+import { OpenAiError } from "../http";
+import { Auth, Db, getSession, query } from "../services";
 import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
-import { WorkerEnv } from "../worker-env";
 
 export interface ApiKeyIdentityValue {
   keyId: string;
@@ -17,99 +16,73 @@ export interface ApiKeyIdentityValue {
   byok: { id: string; ciphertext: string } | null;
 }
 
-export class ApiKeyIdentity extends Context.Service<ApiKeyIdentity, ApiKeyIdentityValue>()("router/ApiKeyIdentity") {}
+export class ApiKeyIdentity extends Context.Service<ApiKeyIdentity, ApiKeyIdentityValue>()("router/ApiKeyIdentity") { }
+
+const unauthorized = (message: string) =>
+  new OpenAiError({ status: 401, message, code: "invalid_api_key", type: "authentication_error" });
+
+// The SHA-256 hash of the request's bearer token, which is how keys are stored.
+const bearerKeyHash = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const token = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
+  if (!token) return yield* unauthorized("A bearer API key is required.");
+  return createHash("sha256").update(token).digest("hex");
+});
+
+const invalidKey = () => unauthorized("Invalid or disabled API key.");
 
 const makeApiKeyAuth = (allowUserSession: boolean) => HttpRouter.middleware()(
   Effect.gen(function* () {
-    const env = yield* WorkerEnv;
-
+    const services = yield* Effect.context<Auth | Db>();
     return (handler) => Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      if (allowUserSession && !request.headers.authorization) {
-        const session = yield* Effect.promise(() => createAuth(env).api.getSession({
-          headers: new Headers(request.headers),
-        }));
-        if (session) return yield* handler;
+      if (allowUserSession && !request.headers.authorization && (yield* getSession(request.headers))) {
+        return yield* handler;
       }
-      const token = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
-
-      if (!token) {
-        return HttpServerResponse.jsonUnsafe({
-          error: { message: "A bearer API key is required.", type: "authentication_error", code: "invalid_api_key", param: null },
-        }, { status: 401 });
-      }
-
-      const hash = createHash("sha256").update(token).digest("hex");
-      const db = drizzle(env.DB);
-      const [key] = yield* Effect.promise(() => db
+      const hash = yield* bearerKeyHash;
+      const [key] = yield* query((db) => db
         .select({ id: apiKey.id })
         .from(apiKey)
         .where(and(eq(apiKey.hash, hash), eq(apiKey.enabled, true)))
-        .limit(1),
-      );
-
-      if (!key) {
-        return HttpServerResponse.jsonUnsafe({
-          error: { message: "Invalid or disabled API key.", type: "authentication_error", code: "invalid_api_key", param: null },
-        }, { status: 401 });
-      }
-
+        .limit(1));
+      if (!key) return yield* invalidKey();
       return yield* handler;
-    });
+    }).pipe(Effect.provideContext(services));
   }),
 ).layer;
 
 export const apiKeyAuth = makeApiKeyAuth(false);
 export const userOrApiKeyAuth = makeApiKeyAuth(true);
 
+// The user's oldest active personal Lumen key.
+const oldestByokKey = (column: "id" | "ciphertext") => sql<string | null>`(
+  SELECT ${sql.raw(column)} FROM byok_key
+  WHERE user_id = ${apiKey.userId} AND status = 'active'
+  ORDER BY created_at ASC LIMIT 1
+)`;
+
 // Gates on a valid API key and resolves whose allowance the request draws on.
-// Used by the inference route, which needs the user identity and limits.
 export const inferenceKeyAuth = HttpRouter.middleware<{ provides: ApiKeyIdentity }>()(
   Effect.gen(function* () {
-    const env = yield* WorkerEnv;
-
+    const services = yield* Effect.context<Db>();
     return (handler) => Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const token = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "")?.[1];
-
-      if (!token) {
-        return HttpServerResponse.jsonUnsafe({
-          error: { message: "A bearer API key is required.", type: "authentication_error", code: "invalid_api_key", param: null },
-        }, { status: 401 });
-      }
-
-      const hash = createHash("sha256").update(token).digest("hex");
-      const db = drizzle(env.DB);
-      const [row] = yield* Effect.promise(() => db
+      const hash = yield* bearerKeyHash;
+      const [row] = yield* query((db) => db
         .select({
           keyId: apiKey.id,
           userId: apiKey.userId,
           fiveHourMicro: usageLimit.fiveHourMicro,
           weeklyMicro: usageLimit.weeklyMicro,
-          byokId: sql<string | null>`(
-            SELECT id FROM byok_key
-            WHERE user_id = ${apiKey.userId} AND status = 'active'
-            ORDER BY created_at ASC LIMIT 1
-          )`,
-          byokCiphertext: sql<string | null>`(
-            SELECT ciphertext FROM byok_key
-            WHERE user_id = ${apiKey.userId} AND status = 'active'
-            ORDER BY created_at ASC LIMIT 1
-          )`,
+          byokId: oldestByokKey("id"),
+          byokCiphertext: oldestByokKey("ciphertext"),
         })
         .from(apiKey)
         .leftJoin(usageLimit, eq(usageLimit.userId, apiKey.userId))
         .where(and(eq(apiKey.hash, hash), eq(apiKey.enabled, true)))
-        .limit(1),
-      );
+        .limit(1));
+      if (!row) return yield* invalidKey();
 
-      if (!row) {
-        return HttpServerResponse.jsonUnsafe({
-          error: { message: "Invalid or disabled API key.", type: "authentication_error", code: "invalid_api_key", param: null },
-        }, { status: 401 });
-      }
-
-      const identity: ApiKeyIdentityValue = {
+      return yield* Effect.provideService(handler, ApiKeyIdentity, {
         keyId: row.keyId,
         userId: row.userId,
         limits: {
@@ -117,8 +90,7 @@ export const inferenceKeyAuth = HttpRouter.middleware<{ provides: ApiKeyIdentity
           weeklyMicro: row.weeklyMicro ?? DEFAULT_WEEKLY_LIMIT_MICRO,
         },
         byok: row.byokId && row.byokCiphertext ? { id: row.byokId, ciphertext: row.byokCiphertext } : null,
-      };
-      return yield* Effect.provideService(handler, ApiKeyIdentity, identity);
-    });
+      });
+    }).pipe(Effect.provideContext(services));
   }),
 ).layer;

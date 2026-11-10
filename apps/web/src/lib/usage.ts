@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getCookie, getRequestHeaders, setResponseHeader } from "@tanstack/react-start/server";
+import { getRequestHeaders, setResponseHeader } from "@tanstack/react-start/server";
 import { env } from "cloudflare:workers";
 import type { UsageLogFeed, UsageSessionFeed, UsageStatus } from "../../../api/src/routes/usage";
 import type { AdminUsage } from "../../../api/src/routes/admin";
@@ -20,25 +20,7 @@ async function requestUsage<T>(path: string, method = "GET", body?: unknown): Pr
   return response.json<T>();
 }
 
-// The viewer's UTC offset in minutes east of UTC, so the API buckets chart
-// days on their calendar. The browser writes this cookie at boot because a
-// server render would otherwise report the Worker's own zone (always UTC).
-function tzOffset(): number {
-  const raw = getCookie("tzOffset");
-  const value = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
-  return Number.isFinite(value) ? value : 0;
-}
-
-// Usage payloads carry the offset back so the chart can lay out its day axis
-// from the same value on both the server render and the browser, avoiding a
-// hydration mismatch from clock-dependent labels.
-export type WithTz<T> = T & { tzOffset: number };
-
-export const getMyUsage = createServerFn({ method: "GET" }).handler(async () => {
-  const offset = tzOffset();
-  const usage = await requestUsage<UsageStatus>(`/api/usage/me?tzOffset=${offset}`);
-  return { ...usage, tzOffset: offset } satisfies WithTz<UsageStatus>;
-});
+export const getMyUsage = createServerFn({ method: "GET" }).handler(() => requestUsage<UsageStatus>("/api/usage/me"));
 
 export const getUsageLogs = createServerFn({ method: "GET" })
   .validator((data: { sessionId?: string; model?: string; limit?: number; offset?: number }) => data)
@@ -61,11 +43,7 @@ export const getUsageSessions = createServerFn({ method: "GET" })
 
 export const getAdminUsage = createServerFn({ method: "GET" })
   .validator((data: { days: number }) => data)
-  .handler(async ({ data }) => {
-    const offset = tzOffset();
-    const usage = await requestUsage<AdminUsage>(`/api/admin/usage?days=${data.days}&tzOffset=${offset}`);
-    return { ...usage, tzOffset: offset } satisfies WithTz<AdminUsage>;
-  });
+  .handler(({ data }) => requestUsage<AdminUsage>(`/api/admin/usage?days=${data.days}`));
 
 export const updateUserLimits = createServerFn({ method: "POST" })
   .validator((data: { userId: string; fiveHourMicro: number | null; weeklyMicro: number | null }) => data)

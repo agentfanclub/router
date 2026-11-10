@@ -1,7 +1,8 @@
 import type { UserUsage } from "./do/user-usage";
 
 export interface Secrets {
-  LUMEN_API_KEY: string;
+  // Comma separated. Each request uses a random key.
+  LUMEN_API_KEYS: string;
   // Optional: unset simply leaves Sarvam unavailable as a club upstream.
   SARVAM_API_KEY?: string;
   // Optional: user-supplied Lumen keys cannot be stored without it.

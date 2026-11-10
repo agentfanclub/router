@@ -24,7 +24,7 @@ function Page() {
   const modelTotals = usage?.perModel.map((model) => ({
     model: model.model,
     tokens: mixDays === 7 ? model.last7DaysTokens : model.inputTokens + model.outputTokens,
-    costMicro: mixDays === 7 ? model.last7DaysCostMicro : model.costMicro,
+    costMicro: mixDays === 7 ? model.last7DaysChargeMicro : model.chargeMicro,
   })) ?? [];
   const modelTokenTotal = modelTotals.reduce((total, model) => total + model.tokens, 0);
   const modelCostTotal = modelTotals.reduce((total, model) => total + model.costMicro, 0);

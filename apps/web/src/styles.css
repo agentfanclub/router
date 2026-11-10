@@ -39,7 +39,7 @@
 }
 
 .users-table tr {
-  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr) 84px 130px 190px;
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr) 84px 170px 190px;
 }
 
 .logs-table tr {
@@ -47,7 +47,7 @@
 }
 
 .models-usage-table tr {
-  grid-template-columns: minmax(200px, 1fr) 96px 120px 120px 110px;
+  grid-template-columns: minmax(180px, 1fr) 88px 112px 112px 100px 100px;
 }
 
 .leaderboard-table tr {

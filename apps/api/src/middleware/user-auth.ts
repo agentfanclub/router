@@ -1,31 +1,17 @@
 import { Context, Effect } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { createAuth } from "../auth";
-import { WorkerEnv } from "../worker-env";
+import { failWith } from "../http";
+import { Auth, getSession, type AuthSession } from "../services";
 
-type Auth = ReturnType<typeof createAuth>;
-type Session = Auth["$Infer"]["Session"];
-
-export class UserSession extends Context.Service<UserSession, Session>()("router/UserSession") { }
+export class UserSession extends Context.Service<UserSession, AuthSession>()("router/UserSession") { }
 
 export const userAuthMiddleware = HttpRouter.middleware<{ provides: UserSession }>()(
   Effect.gen(function* () {
-    const env = yield* WorkerEnv;
-    const auth = createAuth(env);
-
+    const auth = yield* Auth;
     return (handler) => Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const session = yield* Effect.promise(() => auth.api.getSession({
-        headers: new Headers(request.headers),
-      }));
-
-      if (!session) {
-        return HttpServerResponse.jsonUnsafe(
-          { error: "Unauthorized" },
-          { status: 401 },
-        );
-      }
-
+      const session = yield* getSession(request.headers).pipe(Effect.provideService(Auth, auth));
+      if (!session) return yield* failWith(401, "Unauthorized");
       return yield* Effect.provideService(handler, UserSession, session);
     }).pipe(
       Effect.map(HttpServerResponse.setHeader("Cache-Control", "no-store")),

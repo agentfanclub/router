@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
-import { user, usageLimit, usageLog } from "../db/schema";
+import { user, usageLimit, usageLog, usageTotal } from "../db/schema";
 import { ApiError, decodeBody, decodeQuery, failWith } from "../http";
 import { UserSession, userAuthMiddleware } from "../middleware/user-auth";
 import { query, WorkerEnv } from "../services";
 import { upstreamKeys } from "../upstreams";
-import { calendarDay, localDayStart, parseUtcOffsetMinutes } from "../util/timezone";
+import { addDays, centralDay, centralDaySql, centralDayStart, centralOffsetMinutes } from "../util/timezone";
 
 export type User = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "role"> & {
   fiveHourMicro: number | null;
@@ -29,11 +29,16 @@ export interface TokenLeaderboard {
   totals: { totalTokens: number; users: number };
 }
 
+// `chargeMicro` is what users were charged at router prices. `costMicro` is
+// what upstreams charged the club. Days are Central calendar days.
 export interface AdminUsage {
   days: number;
-  perUser: { userId: string; name: string; email: string; clubMicro: number; personalMicro: number; sessions: number }[];
-  perModel: { model: string; costMicro: number; requests: number; inputTokens: number; outputTokens: number }[];
-  history: { day: string; model: string; tokens: number; costMicro: number }[];
+  perUser: { userId: string; name: string; email: string; clubChargeMicro: number; personalChargeMicro: number; costMicro: number; sessions: number }[];
+  // Club billing only.
+  perModel: { model: string; requests: number; inputTokens: number; outputTokens: number; chargeMicro: number; costMicro: number }[];
+  history: { day: string; model: string; tokens: number; chargeMicro: number; costMicro: number }[];
+  // Central time's current UTC offset in minutes east, for laying out the chart's days.
+  tzOffset: number;
 }
 
 const adminAuth = HttpRouter.middleware()((handler) => Effect.gen(function* () {
@@ -55,10 +60,7 @@ const lumenUsageSchema = Schema.Struct({
 
 export type LumenUsage = typeof lumenUsageSchema.Type;
 
-const UsageQuery = Schema.Struct({
-  days: Schema.optional(Schema.String),
-  tzOffset: Schema.optional(Schema.String),
-});
+const UsageQuery = Schema.Struct({ days: Schema.optional(Schema.String) });
 
 // Null restores the default. Limits are whole micro-dollars up to $1M.
 const Limit = Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1_000_000_000_000)));
@@ -81,82 +83,107 @@ export const adminRoutes = Layer.mergeAll(
     return HttpServerResponse.jsonUnsafe(users satisfies User[]);
   })),
 
-  // Cross-user spend aggregates from the usage log, powering the admin
-  // graphs. The `days` query parameter selects a 7 or 30 day window.
+  // Cross-user usage from the logs, powering the admin graphs. The `days`
+  // query parameter selects the last 7 or 30 Central days.
   HttpRouter.add("GET", "/api/admin/usage", Effect.fn("adminUsage")(function* () {
     const params = yield* decodeQuery(UsageQuery);
-    const days = params.days === "30" ? 30 : 7;
-    const offsetMinutes = parseUtcOffsetMinutes(params.tzOffset ?? null);
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    // The model spend table tracks club billing. The token chart includes all users and keys.
-    const inRange = and(gte(usageLog.createdAt, since), eq(usageLog.billed, "club"));
+    const days = params.days === "7" ? 7 : 30;
+    const now = Date.now();
+    const since = new Date(centralDayStart(addDays(centralDay(now), -(days - 1))));
+    const inRange = gte(usageLog.createdAt, since);
+    const charge = (billed: "club" | "personal") => sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.billed} = ${billed} THEN ${usageLog.chargeMicro} ELSE 0 END), 0)`;
 
     const [perUser, perModel, history] = yield* query((db) => Promise.all([
       db.select({
         userId: usageLog.userId,
         name: user.name,
         email: user.email,
-        clubMicro: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.billed} = 'club' THEN ${usageLog.costMicro} ELSE 0 END), 0)`,
-        personalMicro: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.billed} = 'personal' THEN ${usageLog.costMicro} ELSE 0 END), 0)`,
+        clubChargeMicro: charge("club"),
+        personalChargeMicro: charge("personal"),
+        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
         sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
       })
         .from(usageLog)
         .innerJoin(user, eq(user.id, usageLog.userId))
-        .where(and(gte(usageLog.createdAt, since)))
+        .where(inRange)
         .groupBy(usageLog.userId, user.name, user.email)
-        .orderBy(desc(sql`COALESCE(SUM(CASE WHEN ${usageLog.billed} = 'club' THEN ${usageLog.costMicro} ELSE 0 END), 0)`)),
+        .orderBy(desc(charge("club"))),
+      // Club billing only.
       db.select({
         model: usageLog.model,
-        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
         requests: sql<number>`COUNT(*)`,
         inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
         outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
-      })
-        .from(usageLog)
-        .where(inRange)
-        .groupBy(usageLog.model)
-        .orderBy(desc(sql`COALESCE(SUM(${usageLog.costMicro}), 0)`)),
-      db.select({
-        day: calendarDay(usageLog.createdAt, offsetMinutes),
-        model: usageLog.model,
-        // Input tokens already include cached tokens.
-        tokens: sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`,
+        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
         costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
       })
         .from(usageLog)
-        .where(gte(usageLog.createdAt, new Date(localDayStart(Date.now(), offsetMinutes) - (days - 1) * 86400000)))
+        .where(and(inRange, eq(usageLog.billed, "club")))
+        .groupBy(usageLog.model)
+        .orderBy(desc(sql`SUM(${usageLog.chargeMicro})`)),
+      // Every user and key. Input tokens already include cached tokens.
+      db.select({
+        day: centralDaySql(usageLog.createdAt),
+        model: usageLog.model,
+        tokens: sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`,
+        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
+        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
+      })
+        .from(usageLog)
+        .where(inRange)
         .groupBy(sql`1`, usageLog.model)
         .orderBy(sql`1`, usageLog.model),
     ]));
 
-    return HttpServerResponse.jsonUnsafe({ days, perUser, perModel, history } satisfies AdminUsage);
+    return HttpServerResponse.jsonUnsafe({ days, perUser, perModel, history, tzOffset: centralOffsetMinutes(now) } satisfies AdminUsage);
   })),
 
   // Token leaderboard: lifetime (or windowed) token totals per user, ranked
-  // highest first. A `days` of 7 or 30 narrows the window; anything else means
-  // lifetime. Prompt tokens already include cached input, so they count once.
+  // highest first. A `days` of 7 or 30 narrows the window to that many
+  // Central days; anything else means lifetime. Prompt tokens already include
+  // cached input, so they count once.
   HttpRouter.add("GET", "/api/admin/token-leaderboard", Effect.fn("tokenLeaderboard")(function* () {
     const { days: range } = yield* decodeQuery(UsageQuery);
     const days = range === "7" ? 7 : range === "30" ? 30 : null;
-    const since = days === null ? null : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const totalTokens = sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`;
-    const entries = yield* query((db) => db.select({
-      userId: usageLog.userId,
-      name: user.name,
-      email: user.email,
-      inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
-      outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
-      totalTokens,
-      requests: sql<number>`COUNT(*)`,
-      sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
-    })
-      .from(usageLog)
-      .innerJoin(user, eq(user.id, usageLog.userId))
-      .where(since ? gte(usageLog.createdAt, since) : undefined)
-      .groupBy(usageLog.userId, user.name, user.email)
-      .orderBy(desc(totalTokens), asc(user.email))
-      .limit(100));
+    const entries = yield* query((db) => {
+      if (days === null) {
+        const totalTokens = sql<number>`SUM(${usageTotal.inputTokens} + ${usageTotal.outputTokens})`;
+        return db.select({
+          userId: user.id,
+          name: user.name,
+          email: user.email,
+          inputTokens: sql<number>`SUM(${usageTotal.inputTokens})`,
+          outputTokens: sql<number>`SUM(${usageTotal.outputTokens})`,
+          totalTokens,
+          requests: sql<number>`SUM(${usageTotal.requests})`,
+          sessions: sql<number>`SUM(${usageTotal.sessions})`,
+        })
+          .from(usageTotal)
+          .innerJoin(user, eq(user.id, usageTotal.userId))
+          .groupBy(user.id, user.name, user.email)
+          .orderBy(desc(totalTokens), asc(user.email))
+          .limit(100);
+      }
+      const since = new Date(centralDayStart(addDays(centralDay(Date.now()), -(days - 1))));
+      const totalTokens = sql<number>`COALESCE(SUM(COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)), 0)`;
+      return db.select({
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
+        outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
+        totalTokens,
+        requests: sql<number>`COUNT(*)`,
+        sessions: sql<number>`COUNT(DISTINCT ${usageLog.sessionId})`,
+      })
+        .from(usageLog)
+        .innerJoin(user, eq(user.id, usageLog.userId))
+        .where(gte(usageLog.createdAt, since))
+        .groupBy(user.id, user.name, user.email)
+        .orderBy(desc(totalTokens), asc(user.email))
+        .limit(100);
+    });
 
     return HttpServerResponse.jsonUnsafe({
       days: days ?? 0,

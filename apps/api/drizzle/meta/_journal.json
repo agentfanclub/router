@@ -71,6 +71,13 @@
       "when": 1792640423666,
       "tag": "0009_rename_lumen_upstream",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794352765954,
+      "tag": "0010_usage_totals",
+      "breakpoints": true
     }
   ]
 }

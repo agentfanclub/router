@@ -44,12 +44,16 @@ export function upstreamKeys(env: ApiEnv, id: UpstreamId): string[] {
 
 type RawModel = (typeof models)[keyof typeof models];
 
-export type PublicModel = Omit<RawModel, "upstreams">;
+// `cost` is what router users pay, in USD per million tokens.
+export type PublicModel = Omit<RawModel, "upstreams" | "upstream_cost">;
+export type ModelCost = PublicModel["cost"];
 
-// Upstreams are listed in priority order. They are internal and never served
-// to clients.
+// Upstreams are listed in priority order. They and their prices are internal
+// and never served to clients.
 export interface CatalogModel extends PublicModel {
   upstreams: UpstreamId[];
+  // What each upstream charges the club, when it differs from `cost`.
+  upstream_cost?: Partial<Record<UpstreamId, ModelCost>>;
 }
 
 export const catalog = models as unknown as Record<string, CatalogModel>;
@@ -61,5 +65,5 @@ for (const [id, model] of Object.entries(catalog)) {
 }
 
 export const publicCatalog: Record<string, PublicModel> = Object.fromEntries(
-  Object.entries(catalog).map(([id, { upstreams: _, ...model }]) => [id, model]),
+  Object.entries(catalog).map(([id, { upstreams: _, upstream_cost: __, ...model }]) => [id, model]),
 );

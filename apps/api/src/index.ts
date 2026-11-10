@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { Context, Effect, Layer } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { adminRoutes } from "./routes/admin";
@@ -8,7 +9,8 @@ import { deviceAuthRoutes } from "./routes/device-auth";
 import { inferenceRoutes } from "./routes/inference";
 import { modelRoutes } from "./routes/models";
 import { usageRoutes } from "./routes/usage";
-import { Auth, servicesLayer, WorkerExecution } from "./services";
+import { Auth, Db, servicesLayer, WorkerExecution } from "./services";
+import { rollUpUsageLogs } from "./usage-aggregates";
 
 export { UserUsage } from "./do/user-usage";
 
@@ -36,4 +38,8 @@ const app = HttpRouter.toWebHandler(routes.pipe(
 
 export default {
   fetch: (request, _env, ctx) => app.handler(request, Context.make(WorkerExecution, ctx)),
+  scheduled: (_controller, _env, ctx) => ctx.waitUntil(Effect.runPromise(rollUpUsageLogs().pipe(
+    Effect.provideService(Db, drizzle(env.DB)),
+    Effect.catch((error) => Effect.sync(() => console.error({ event: "usage_rollup_error", error: String(error.cause) }))),
+  ))),
 } satisfies ExportedHandler<Env>;

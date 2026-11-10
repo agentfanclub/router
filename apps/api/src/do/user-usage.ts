@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import { usageLog } from "../db/schema";
 import type { ApiEnv } from "../env";
+import { usageWriteStatements, type UsageRecord } from "../usage-aggregates";
 import type { UpstreamRoute } from "../upstreams";
 import type { ParsedUsage, UsageLimits } from "../util/usage";
 
@@ -42,7 +41,9 @@ export interface SettleInput {
   requestId: string;
   route: UpstreamRoute;
   usage: ParsedUsage | null;
-  // Cost of `usage`. Ignored when usage is unknown.
+  // What the user is charged for `usage`, and what it costs the club.
+  // Ignored when usage is unknown.
+  chargeMicro: number;
   costMicro: number;
   status: "ok" | "error" | "aborted";
   durationMs: number;
@@ -55,6 +56,10 @@ const RESERVATION_TTL_MS = 15 * 60 * 1000;
 const SESSION_STICKINESS_MS = 60 * 60 * 1000;
 const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SYNC_RETRY_MS = 30_000;
+// Journal records written to D1 per batch, and batches per sync. Each record
+// is five statements, which keeps a sync within D1's per-invocation limit.
+const SYNC_BATCH_SIZE = 20;
+const SYNC_MAX_BATCHES = 5;
 
 const WINDOW_NAMES = ["five_hour", "weekly"] as const;
 type WindowName = (typeof WINDOW_NAMES)[number];
@@ -66,9 +71,6 @@ interface WindowRow {
   start_ms: number;
   used_micro: number;
 }
-
-// JSON-safe copy of the D1 record. Request bodies are never persisted.
-type UsageRecord = Omit<typeof usageLog.$inferSelect, "createdAt"> & { createdAt: number };
 
 interface RequestRow {
   id: string;
@@ -194,7 +196,7 @@ export class UserUsage extends DurableObject<ApiEnv> {
       id: input.requestId, userId: input.userId, apiKeyId: input.apiKeyId,
       sessionId: input.sessionId, model: input.model, upstream: route,
       billed: route === "byok" ? "personal" : "club", inputTokens: null,
-      outputTokens: null, cachedTokens: null, costMicro: 0, estimated: false,
+      outputTokens: null, cachedTokens: null, chargeMicro: 0, costMicro: 0, estimated: false,
       status, durationMs: status === "denied" ? 0 : null, createdAt: input.createdAt,
     };
     const fiveHour = this.one<WindowRow>(`SELECT * FROM windows WHERE name = 'five_hour'`)!;
@@ -212,10 +214,11 @@ export class UserUsage extends DurableObject<ApiEnv> {
     // they are still current.
     const row = this.one<RequestRow>(`SELECT * FROM requests WHERE id = ?`, input.requestId);
     if (row && !row.settled) {
-      const record: UsageRecord = JSON.parse(row.record);
-      const previousCost = record.billed === "club" ? record.costMicro : 0;
+      const record = parseRecord(row.record);
+      const previousCharge = record.billed === "club" ? record.chargeMicro : 0;
       record.upstream = input.route;
       record.billed = input.route === "byok" ? "personal" : "club";
+      record.chargeMicro = input.usage === null ? 0 : input.chargeMicro;
       record.costMicro = input.usage === null ? 0 : input.costMicro;
       record.inputTokens = input.usage?.inputTokens ?? null;
       record.outputTokens = input.usage?.outputTokens ?? null;
@@ -224,9 +227,9 @@ export class UserUsage extends DurableObject<ApiEnv> {
       // Unknown usage on a non-error response is recorded at zero cost.
       record.estimated = input.usage === null && input.status !== "error";
       record.durationMs = input.durationMs;
-      const cost = record.billed === "club" ? record.costMicro : 0;
+      const charge = record.billed === "club" ? record.chargeMicro : 0;
       this.ctx.storage.transactionSync(() => {
-        this.adjustCharge(row, cost - previousCost);
+        this.adjustCharge(row, charge - previousCharge);
         this.exec(`DELETE FROM reservations WHERE id = ?`, input.requestId);
         this.exec(`UPDATE requests SET record = ?, settled = 1, version = version + 1 WHERE id = ?`, JSON.stringify(record), input.requestId);
       });
@@ -261,9 +264,10 @@ export class UserUsage extends DurableObject<ApiEnv> {
       const row = this.one<RequestRow>(`SELECT * FROM requests WHERE id = ?`, id);
       this.ctx.storage.transactionSync(() => {
         if (row) {
-          const record: UsageRecord = JSON.parse(row.record);
+          const record = parseRecord(row.record);
           record.status = "aborted";
           record.estimated = true;
+          record.chargeMicro = 0;
           record.costMicro = 0;
           record.durationMs = now - record.createdAt;
           this.exec(`UPDATE requests SET record = ?, version = version + 1 WHERE id = ?`, JSON.stringify(record), id);
@@ -276,17 +280,15 @@ export class UserUsage extends DurableObject<ApiEnv> {
   private syncLogs(): Promise<void> {
     this.syncing ??= (async () => {
       try {
-        const db = drizzle(this.env.DB);
-        let rows = this.unsyncedRequests();
-        while (rows.length > 0) {
-          for (const row of rows) {
-            const record: UsageRecord = JSON.parse(row.record);
-            const values = { ...record, createdAt: new Date(record.createdAt) };
-            await db.insert(usageLog).values(values).onConflictDoUpdate({ target: usageLog.id, set: values });
-            this.exec(`UPDATE requests SET synced_version = ? WHERE id = ?`, row.version, row.id);
-          }
-          rows = this.unsyncedRequests();
+        const d1 = this.env.DB;
+        for (let batch = 0; batch < SYNC_MAX_BATCHES; batch++) {
+          const rows = this.unsyncedRequests();
+          if (rows.length === 0) return;
+          await d1.batch(rows.flatMap((row) => usageWriteStatements(d1, parseRecord(row.record))));
+          for (const row of rows) this.exec(`UPDATE requests SET synced_version = ? WHERE id = ?`, row.version, row.id);
         }
+        // A backlog continues in the next invocation.
+        await this.scheduleAlarm(Date.now());
       } catch (error) {
         console.error("usage journal sync failed", error);
         await this.scheduleAlarm(Date.now() + SYNC_RETRY_MS);
@@ -296,7 +298,7 @@ export class UserUsage extends DurableObject<ApiEnv> {
   }
 
   private unsyncedRequests(): RequestRow[] {
-    return this.all<RequestRow>(`SELECT * FROM requests WHERE version > synced_version LIMIT 50`);
+    return this.all<RequestRow>(`SELECT * FROM requests WHERE version > synced_version LIMIT ${SYNC_BATCH_SIZE}`);
   }
 
   private snapshot(limits: UsageLimits, now: number): UsageSnapshot {
@@ -386,4 +388,15 @@ export class UserUsage extends DurableObject<ApiEnv> {
   private one<T>(query: string, ...params: (string | number)[]): T | null {
     return this.all<T>(query, ...params)[0] ?? null;
   }
+}
+
+// Records journaled before charge and cost were split carry one price as
+// `costMicro`, which was the user's charge.
+function parseRecord(json: string): UsageRecord {
+  const record = JSON.parse(json) as UsageRecord;
+  if (record.chargeMicro === undefined) {
+    record.chargeMicro = record.costMicro;
+    if (record.billed === "personal") record.costMicro = 0;
+  }
+  return record;
 }

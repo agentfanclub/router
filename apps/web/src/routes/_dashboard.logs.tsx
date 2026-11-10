@@ -69,7 +69,7 @@ function Page() {
               <Td className="whitespace-nowrap tabular-nums">
                 {formatTokens(item.inputTokens)} → {formatTokens(item.outputTokens)}
               </Td>
-              <Td className="whitespace-nowrap tabular-nums">{item.estimated && item.costMicro > 0 ? "≈ " : ""}{formatUsdMicro(item.costMicro)}</Td>
+              <Td className="whitespace-nowrap tabular-nums">{item.estimated && item.chargeMicro > 0 ? "≈ " : ""}{formatUsdMicro(item.chargeMicro)}</Td>
               <Td>
                 <span className={`inline-block rounded border px-1.5 py-0.5 text-xs ${statusStyles[item.pending > 0 ? "pending" : item.errors > 0 ? "error" : "ok"]}`} title={item.errors > 0 ? `${item.errors} unsuccessful requests` : undefined}>
                   {item.pending > 0 ? "pending" : item.errors > 0 ? "error" : "ok"}

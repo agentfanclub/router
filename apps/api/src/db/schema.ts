@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { DeviceClient } from "../device-clients";
 
 export const userRoles = ["admin", "user"] as const;
@@ -67,7 +67,7 @@ export const account = sqliteTable("account", {
 
 // One completed, denied, or failed inference request. The request ID is the
 // primary key so worker retries after a transient D1 error cannot double-log.
-// Costs are integer micro-dollars. Prompt and completion bodies are never stored.
+// Money is integer micro-dollars. Prompt and completion bodies are never stored.
 export const usageUpstreams = ["lumen", "byok", "sarvam"] as const;
 export const usageBilled = ["club", "personal"] as const;
 export const usageStatuses = ["pending", "ok", "error", "aborted", "denied"] as const;
@@ -84,6 +84,9 @@ export const usageLog = sqliteTable("usage_log", {
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),
   cachedTokens: integer("cached_tokens"),
+  // What the user is charged at the router's prices. Usage caps count this.
+  chargeMicro: integer("charge_micro").notNull().default(0),
+  // What the upstream charges the club. Zero on the user's own key.
   costMicro: integer("cost_micro").notNull(),
   estimated: integer("estimated", { mode: "boolean" }).notNull().default(false),
   status: text("status", { enum: usageStatuses }).notNull(),
@@ -94,6 +97,50 @@ export const usageLog = sqliteTable("usage_log", {
   index("usage_log_session_idx").on(table.sessionId),
   index("usage_log_created_idx").on(table.createdAt),
 ]);
+
+// Lifetime totals per user and model, kept in the same D1 transaction as
+// each log write (see usage-aggregates.ts) so lifetime figures never scan
+// logs. Requests count every logged attempt. Sessions count each session
+// once, on its first request.
+export const usageTotal = sqliteTable("usage_total", {
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  model: text("model").notNull(),
+  requests: integer("requests").notNull(),
+  sessions: integer("sessions").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  cachedTokens: integer("cached_tokens").notNull(),
+  clubChargeMicro: integer("club_charge_micro").notNull(),
+  personalChargeMicro: integer("personal_charge_micro").notNull(),
+  costMicro: integer("cost_micro").notNull(),
+}, (table) => [primaryKey({ columns: [table.userId, table.model] })]);
+
+// Daily totals of usage logs older than the raw retention window, one row
+// per user and Central calendar day. The nightly rollup folds logs in and
+// deletes them in one transaction.
+export interface DailyModelUsage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  chargeMicro: number;
+  costMicro: number;
+}
+
+export const usageDaily = sqliteTable("usage_daily", {
+  day: text("day").notNull(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  requests: integer("requests").notNull(),
+  sessions: integer("sessions").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  cachedTokens: integer("cached_tokens").notNull(),
+  clubChargeMicro: integer("club_charge_micro").notNull(),
+  personalChargeMicro: integer("personal_charge_micro").notNull(),
+  costMicro: integer("cost_micro").notNull(),
+  // The same totals broken down by model ID.
+  models: text("models", { mode: "json" }).$type<Record<string, DailyModelUsage>>().notNull(),
+}, (table) => [primaryKey({ columns: [table.userId, table.day] })]);
 
 // Per-user overrides of the default usage caps. Null columns fall back to the defaults.
 export const usageLimit = sqliteTable("usage_limit", {

@@ -6,7 +6,7 @@ import type { DenyReason, UsageSnapshot } from "../do/user-usage";
 import { OpenAiError } from "../http";
 import { ApiKeyIdentity, inferenceKeyAuth } from "../middleware/api-key-auth";
 import { query, UsageCoordinator, WorkerEnv, WorkerExecution } from "../services";
-import { catalog, upstreamKeys, upstreams, type CatalogModel, type UpstreamRoute } from "../upstreams";
+import { catalog, upstreamKeys, upstreams, type CatalogModel, type ModelCost, type UpstreamRoute } from "../upstreams";
 import { decryptSecret } from "../util/secret-box";
 import { usageCaptureTransform } from "../util/sse-usage";
 import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
@@ -61,8 +61,12 @@ const parseChatRequest = (text: string) => Effect.try(() => JSON.parse(text) as 
   Effect.mapError(() => chatError(400, "invalid_request", "The request body must be a JSON chat completion with model and messages.")),
 );
 
-function modelPrice(model: CatalogModel): RoutePrice {
-  return { input: model.cost.input, output: model.cost.output, cacheRead: model.cost.cache_read };
+const toPrice = (cost: ModelCost): RoutePrice => ({ input: cost.input, output: cost.output, cacheRead: cost.cache_read });
+
+// What the club pays for a request on `route`. The user's own key costs the club nothing.
+function upstreamPrice(model: CatalogModel, route: UpstreamRoute): RoutePrice {
+  if (route === "byok") return { input: 0, output: 0, cacheRead: 0 };
+  return toPrice(model.upstream_cost?.[route] ?? model.cost);
 }
 
 const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerRequest.HttpServerRequest) {
@@ -87,7 +91,8 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   const logContext = { requestId, model: chat.model, stream: chat.stream };
-  const price = modelPrice(model);
+  // What the user pays. Reservations and usage caps use it.
+  const price = toPrice(model.cost);
 
   // Club upstreams serving the model with a configured key, in priority
   // order, then the user's own key when it can serve the model.
@@ -135,7 +140,8 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
     const settle = usage.settle(identity.userId, {
       requestId, route, status, durationMs,
       usage: parsed,
-      costMicro: parsed ? computeCostMicro(parsed, price) : 0,
+      chargeMicro: parsed ? computeCostMicro(parsed, price) : 0,
+      costMicro: parsed ? computeCostMicro(parsed, upstreamPrice(model, route)) : 0,
       limits: identity.limits,
     });
     const pending = Effect.runPromise(settle.pipe(

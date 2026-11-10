@@ -24,7 +24,7 @@ function makeInstance() {
     transactionSync: (fn: () => void) => db.transaction(fn)(),
   };
   const statement = { bind: () => statement, run: async () => ({ success: true, results: [] }) };
-  const d1 = { prepare: () => statement };
+  const d1 = { prepare: () => statement, batch: async () => [] };
   return new UserUsage({ storage } as unknown as DurableObjectState, { DB: d1 } as never);
 }
 
@@ -49,13 +49,14 @@ function admit(usage: InstanceType<typeof UserUsage>, overrides: {
   });
 }
 
-function spend(usage: InstanceType<typeof UserUsage>, costMicro: number) {
+function spend(usage: InstanceType<typeof UserUsage>, chargeMicro: number) {
   const requestId = crypto.randomUUID();
   return admit(usage, { requestId }).then(() => usage.settle({
     requestId,
     route: "lumen",
     usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 },
-    costMicro,
+    chargeMicro,
+    costMicro: chargeMicro,
     status: "ok",
     durationMs: 1,
     limits: LIMITS,
@@ -107,7 +108,7 @@ describe("admission", () => {
 });
 
 describe("settlement", () => {
-  test("charges actual cost and releases the reservation", async () => {
+  test("charges the user's price and releases the reservation", async () => {
     const usage = makeInstance();
     const snapshot = await spend(usage, 1_234);
     expect(snapshot.fiveHour.usedMicro).toBe(1_234);
@@ -121,7 +122,7 @@ describe("settlement", () => {
     await admit(usage, { requestId, routes: ["byok"] });
     const snapshot = await usage.settle({
       requestId, route: "byok", usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 },
-      costMicro: 5_000, status: "ok", durationMs: 1, limits: LIMITS,
+      chargeMicro: 5_000, costMicro: 0, status: "ok", durationMs: 1, limits: LIMITS,
     });
     expect(snapshot.fiveHour.usedMicro).toBe(0);
   });

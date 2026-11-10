@@ -14,21 +14,28 @@ export function modelColor(model: string): string {
   return modelColors[model] ?? "#a185f7";
 }
 
+// Money units chart coins (dollars): what users were charged, or what
+// upstreams charged the club.
+export type ChartUnit = "tokens" | "charge" | "cost";
+const unitOptions = [["charge", "Charged"], ["cost", "Our cost"], ["tokens", "Tokens"]] as const;
+
 export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens", onUnitChange, title = "Daily token usage", description, tzOffset = 0 }: {
   history: { day: string; model: string; value: number }[];
   models: string[];
   days: number;
   onDaysChange: (days: number) => void;
-  unit?: "tokens" | "coins";
-  onUnitChange?: (unit: "tokens" | "coins") => void;
+  unit?: ChartUnit;
+  onUnitChange?: (unit: ChartUnit) => void;
   title?: string;
   description?: string;
-  // Viewer's UTC offset in minutes east, matching the API's day bucketing.
+  // UTC offset in minutes east of the API's day bucketing (Central time).
   tzOffset?: number;
 }) {
   const headingId = useId();
   const tooltipId = useId();
-  const formatValue = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: unit === "coins" ? 6 : 0 });
+  const money = unit !== "tokens";
+  const unitLabel = money ? "coins" : "tokens";
+  const formatValue = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: money ? 6 : 0 });
   const plotRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<{ dayIndex: number; modelIndex: number; x: number; y: number } | null>(null);
 
@@ -66,7 +73,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
         point.total += row.value;
       }
     }
-    const minStep = unit === "coins" ? 0.000001 : 1;
+    const minStep = money ? 0.000001 : 1;
     const max = Math.max(minStep, ...data.map((row) => row.total));
     const roughStep = Math.max(minStep, max / 4);
     const magnitude = 10 ** Math.floor(Math.log10(roughStep));
@@ -74,7 +81,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
     const scaleMax = Math.ceil(max / step) * step;
     const ticks = Array.from({ length: Math.round(scaleMax / step) + 1 }, (_, index) => index * step);
     return { data, scaleMax, ticks };
-  }, [history, days, models, unit, tzOffset]);
+  }, [history, days, models, money, tzOffset]);
 
   return (
     <section className="mt-9" aria-labelledby={headingId}>
@@ -86,7 +93,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
         <div className="flex flex-wrap items-center gap-3">
           {onUnitChange && (
             <div className="inline-flex rounded-lg bg-neutral-100 text-xs font-normal" role="group" aria-label="Chart metric">
-              {([['coins', 'Cost'], ['tokens', 'Tokens']] as const).map(([value, label]) => (
+              {unitOptions.map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={unit === value} onClick={() => { onUnitChange(value); setTooltip(null); }} className={`cursor-pointer rounded-lg border px-3 py-1.5 transition-colors ${unit === value ? "border-neutral-300 bg-white text-neutral-900 shadow-sm" : "border-transparent text-neutral-600 hover:text-neutral-900"}`}>{label}</button>
               ))}
             </div>
@@ -101,7 +108,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
           <>
             <div className="flex gap-3">
               <div aria-hidden="true" className="relative h-56 w-10 shrink-0 text-right text-[11px] text-neutral-500 sm:h-64">
-                {ticks.map((tick) => <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${tick / scaleMax * 100}%` }}>{unit === "coins" ? tick.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 6 }) : formatTokens(tick)}</span>)}
+                {ticks.map((tick) => <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${tick / scaleMax * 100}%` }}>{money ? tick.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 6 }) : formatTokens(tick)}</span>)}
               </div>
               <div className="min-w-0 flex-1">
                 <div ref={plotRef} className="relative h-56 sm:h-64" onPointerLeave={() => setTooltip(null)} onKeyDown={(event) => { if (event.key === "Escape") setTooltip(null); }}>
@@ -117,7 +124,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
                             <div key={models[modelIndex]} tabIndex={0}
                               className="shrink-0 border-t-2 border-white last:border-t-0 focus-visible:brightness-110"
                               style={{ height: `${count / point.total * 100}%`, background: modelColor(models[modelIndex]) }}
-                              aria-label={`${models[modelIndex]} · ${point.label}: ${formatValue(count)} ${unit}`}
+                              aria-label={`${models[modelIndex]} · ${point.label}: ${formatValue(count)} ${unitLabel}`}
                               aria-describedby={tooltip?.dayIndex === dayIndex && tooltip.modelIndex === modelIndex ? tooltipId : undefined}
                               onPointerEnter={(event) => showTooltip({ dayIndex, modelIndex, clientX: event.clientX, clientY: event.clientY })}
                               onPointerMove={(event) => showTooltip({ dayIndex, modelIndex, clientX: event.clientX, clientY: event.clientY })}
@@ -140,7 +147,7 @@ export function DailyUsage({ history, models, days, onDaysChange, unit = "tokens
                         <span aria-hidden="true" className="size-2 shrink-0 rounded-sm" style={{ background: modelColor(models[tooltip.modelIndex]) }} />
                         <span className="break-all text-xs">{models[tooltip.modelIndex]}</span>
                       </div>
-                      <p className="mt-1 text-sm font-medium leading-5 tabular-nums">{formatValue(data[tooltip.dayIndex].counts[tooltip.modelIndex])} <span className="text-xs font-normal text-neutral-400">{unit}</span></p>
+                      <p className="mt-1 text-sm font-medium leading-5 tabular-nums">{formatValue(data[tooltip.dayIndex].counts[tooltip.modelIndex])} <span className="text-xs font-normal text-neutral-400">{unitLabel}</span></p>
                     </div>
                   )}
                 </div>

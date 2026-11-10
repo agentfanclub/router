@@ -2,25 +2,27 @@ import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import type { UsageSnapshot } from "../do/user-usage";
-import { usageLimit, usageLog } from "../db/schema";
+import { usageLimit, usageLog, usageTotal } from "../db/schema";
 import { ApiError, decodeQuery } from "../http";
 import { UserSession, userAuth } from "../middleware/user-auth";
 import { query, UsageCoordinator } from "../services";
-import { calendarDay, localDayStart, parseUtcOffsetMinutes } from "../util/timezone";
+import { addDays, centralDay, centralDaySql, centralDayStart, centralOffsetMinutes } from "../util/timezone";
 import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
 
 export type UsageLogRow = Pick<
   typeof usageLog.$inferSelect,
-  "id" | "sessionId" | "model" | "upstream" | "billed" | "inputTokens" | "outputTokens" | "cachedTokens" | "costMicro" | "estimated" | "status" | "durationMs" | "createdAt"
+  "id" | "sessionId" | "model" | "upstream" | "billed" | "inputTokens" | "outputTokens" | "cachedTokens" | "chargeMicro" | "estimated" | "status" | "durationMs" | "createdAt"
 >;
 
 export interface UsageStatus {
   fiveHour: { usedPercent: number; pendingPercent: number; resetsInMs: number };
   weekly: { usedPercent: number; pendingPercent: number; resetsInMs: number };
   tokens: { lifetime: number; last24Hours: number; last7Days: number; last30Days: number };
-  // Sparse daily model totals for the last 30 UTC dates. The chart fills gaps.
+  // Sparse daily model totals for the last 30 Central calendar days. The chart fills gaps.
   history: { day: string; model: string; tokens: number }[];
-  perModel: { model: string; inputTokens: number; outputTokens: number; cachedTokens: number; costMicro: number; last7DaysTokens: number; last7DaysCostMicro: number }[];
+  perModel: { model: string; inputTokens: number; outputTokens: number; cachedTokens: number; chargeMicro: number; last7DaysTokens: number; last7DaysChargeMicro: number }[];
+  // Central time's current UTC offset in minutes east, for laying out the chart's days.
+  tzOffset: number;
 }
 
 export interface UsageLogFeed {
@@ -38,7 +40,7 @@ export interface UsageSessionFeed {
     outputTokens: number;
     cachedTokens: number;
     durationMs: number;
-    costMicro: number;
+    chargeMicro: number;
     estimated: number;
     errors: number;
     pending: number;
@@ -64,7 +66,6 @@ const toInt = (raw: string | undefined, fallback: number) => {
   return Number.isFinite(value) ? value : fallback;
 };
 
-const MeQuery = Schema.Struct({ tzOffset: Schema.optional(Schema.String) });
 const SessionsQuery = Schema.Struct({ page: OptionalString, model: Schema.optional(Schema.String) });
 const LogsQuery = Schema.Struct({
   limit: OptionalString,
@@ -78,8 +79,6 @@ export const usageRoutes = Layer.mergeAll(
   HttpRouter.add("GET", "/api/usage/me", Effect.fn("myUsage")(function* () {
     const session = yield* UserSession;
     const usage = yield* UsageCoordinator;
-    const { tzOffset } = yield* decodeQuery(MeQuery);
-    const offsetMinutes = parseUtcOffsetMinutes(tzOffset ?? null);
 
     const limits = yield* effectiveLimits(session.user.id);
     const windows = yield* usage.status(session.user.id, limits).pipe(
@@ -88,36 +87,37 @@ export const usageRoutes = Layer.mergeAll(
 
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
-    const dayStart = localDayStart(now, offsetMinutes);
     // prompt_tokens already includes cached input. Count those tokens once.
     const totalTokens = sql`COALESCE(${usageLog.inputTokens}, 0) + COALESCE(${usageLog.outputTokens}, 0)`;
     const userFilter = eq(usageLog.userId, session.user.id);
-    const [totals, history, perModel] = yield* query((db) => Promise.all([
+    const [[lifetime], [recent], history, perModel] = yield* query((db) => Promise.all([
+      db.select({ tokens: sql<number>`COALESCE(SUM(${usageTotal.inputTokens} + ${usageTotal.outputTokens}), 0)` })
+        .from(usageTotal).where(eq(usageTotal.userId, session.user.id)),
       db.select({
-        lifetime: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
         last24Hours: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
         last7Days: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-        last30Days: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 30 * dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-      }).from(usageLog).where(userFilter),
+        last30Days: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
+      }).from(usageLog).where(and(userFilter, gte(usageLog.createdAt, new Date(now - 30 * dayMs)))),
       db.select({
-        day: calendarDay(usageLog.createdAt, offsetMinutes),
+        day: centralDaySql(usageLog.createdAt),
         model: usageLog.model,
         tokens: sql<number>`COALESCE(SUM(${totalTokens}), 0)`,
       }).from(usageLog)
-        .where(and(userFilter, gte(usageLog.createdAt, new Date(dayStart - 29 * dayMs))))
+        .where(and(userFilter, gte(usageLog.createdAt, new Date(centralDayStart(addDays(centralDay(now), -29))))))
         .groupBy(sql`1`, usageLog.model).orderBy(sql`1`, usageLog.model),
       db.select({
         model: usageLog.model,
         inputTokens: sql<number>`COALESCE(SUM(${usageLog.inputTokens}), 0)`,
         outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
         cachedTokens: sql<number>`COALESCE(SUM(${usageLog.cachedTokens}), 0)`,
-        costMicro: sql<number>`COALESCE(SUM(${usageLog.costMicro}), 0)`,
+        chargeMicro: sql<number>`COALESCE(SUM(${usageLog.chargeMicro}), 0)`,
         last7DaysTokens: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${totalTokens} ELSE 0 END), 0)`,
-        last7DaysCostMicro: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${usageLog.costMicro} ELSE 0 END), 0)`,
+        last7DaysChargeMicro: sql<number>`COALESCE(SUM(CASE WHEN ${usageLog.createdAt} >= ${now - 7 * dayMs} THEN ${usageLog.chargeMicro} ELSE 0 END), 0)`,
       }).from(usageLog)
         .where(and(userFilter, gte(usageLog.createdAt, new Date(now - 30 * dayMs))))
         .groupBy(usageLog.model).orderBy(desc(sql`SUM(${totalTokens})`)),
     ]));
+
     const publicWindow = (window: UsageSnapshot["fiveHour"]) => ({
       usedPercent: window.limitMicro > 0 ? window.usedMicro / window.limitMicro * 100 : 100,
       pendingPercent: window.limitMicro > 0 ? windows.pendingMicro / window.limitMicro * 100 : 0,
@@ -126,7 +126,9 @@ export const usageRoutes = Layer.mergeAll(
     return HttpServerResponse.jsonUnsafe({
       fiveHour: publicWindow(windows.fiveHour),
       weekly: publicWindow(windows.weekly),
-      tokens: totals[0], history, perModel,
+      tokens: { lifetime: lifetime!.tokens, ...recent! },
+      history, perModel,
+      tzOffset: centralOffsetMinutes(now),
     } satisfies UsageStatus);
   })),
 
@@ -145,7 +147,7 @@ export const usageRoutes = Layer.mergeAll(
       outputTokens: sql<number>`COALESCE(SUM(${usageLog.outputTokens}), 0)`,
       cachedTokens: sql<number>`COALESCE(SUM(${usageLog.cachedTokens}), 0)`,
       durationMs: sql<number>`COALESCE(SUM(${usageLog.durationMs}), 0)`,
-      costMicro: sql<number>`SUM(${usageLog.costMicro})`,
+      chargeMicro: sql<number>`SUM(${usageLog.chargeMicro})`,
       estimated: sql<number>`MAX(${usageLog.estimated})`,
       errors: sql<number>`SUM(CASE WHEN ${usageLog.status} IN ('error', 'aborted', 'denied') THEN 1 ELSE 0 END)`,
       pending: sql<number>`SUM(CASE WHEN ${usageLog.status} = 'pending' THEN 1 ELSE 0 END)`,
@@ -181,7 +183,7 @@ export const usageRoutes = Layer.mergeAll(
         inputTokens: usageLog.inputTokens,
         outputTokens: usageLog.outputTokens,
         cachedTokens: usageLog.cachedTokens,
-        costMicro: usageLog.costMicro,
+        chargeMicro: usageLog.chargeMicro,
         estimated: usageLog.estimated,
         status: usageLog.status,
         durationMs: usageLog.durationMs,

@@ -1,15 +1,26 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders, setResponseHeader } from "@tanstack/react-start/server";
 import { env } from "cloudflare:workers";
-import type { LumenUsage, TokenLeaderboard, User } from "../../../api/src/routes/admin";
+import type { AdminUsers, LifetimeUsage, LumenUsage, TokenLeaderboard } from "../../../api/src/routes/admin";
 
-export const listUsers = createServerFn({ method: "GET" }).handler(async () => {
+export const listUsers = createServerFn({ method: "GET" })
+  .validator((data: { page: number }) => data)
+  .handler(async ({ data }) => {
+    setResponseHeader("Cache-Control", "no-store");
+    const response = await env.API.fetch(`https://api/api/admin/users?page=${data.page}`, {
+      headers: getRequestHeaders(),
+    });
+    if (!response.ok) throw new Error("Couldn't load users. Try again.");
+    return response.json<AdminUsers>();
+  });
+
+export const getLifetimeUsage = createServerFn({ method: "GET" }).handler(async () => {
   setResponseHeader("Cache-Control", "no-store");
-  const response = await env.API.fetch("https://api/api/admin/users", {
+  const response = await env.API.fetch("https://api/api/admin/lifetime-usage", {
     headers: getRequestHeaders(),
   });
-  if (!response.ok) throw new Error("Couldn't load users. Try again.");
-  return response.json<User[]>();
+  if (!response.ok) throw new Error("Couldn't load lifetime usage. Try again.");
+  return response.json<LifetimeUsage>();
 });
 
 export const getTokenLeaderboard = createServerFn({ method: "GET" })

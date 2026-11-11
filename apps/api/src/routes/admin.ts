@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { user, usageLimit, usageTotal } from "../db/schema";
@@ -9,10 +9,76 @@ import { upstreamKeys } from "../upstreams";
 import { dailyUsage } from "../usage-aggregates";
 import { addDays, centralDay, centralOffsetMinutes } from "../util/timezone";
 
-export type User = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "role"> & {
+export interface LifetimeUsage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  clubChargeMicro: number;
+  personalChargeMicro: number;
+  costMicro: number;
+  sessions: number;
+}
+
+export type AdminUser = Pick<typeof user.$inferSelect, "id" | "name" | "email" | "role"> & LifetimeUsage & {
   fiveHourMicro: number | null;
   weeklyMicro: number | null;
 };
+
+export interface AdminUsers {
+  users: AdminUser[];
+  page: number;
+  hasMore: boolean;
+}
+
+export const ADMIN_PAGE_SIZE = 20;
+
+// Lifetime reads use the compact totals, never request logs. Cached input is
+// already included in input_tokens and must not be added again.
+export async function lifetimeUsage(d1: D1Database): Promise<LifetimeUsage> {
+  const { results } = await d1.prepare(`
+    SELECT COALESCE(SUM(requests), 0) AS requests,
+      COALESCE(SUM(input_tokens), 0) AS inputTokens,
+      COALESCE(SUM(output_tokens), 0) AS outputTokens,
+      COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens,
+      COALESCE(SUM(club_charge_micro), 0) AS clubChargeMicro,
+      COALESCE(SUM(personal_charge_micro), 0) AS personalChargeMicro,
+      COALESCE(SUM(cost_micro), 0) AS costMicro,
+      COALESCE(SUM(sessions), 0) AS sessions
+    FROM usage_total
+  `).all<LifetimeUsage>();
+  return results[0]!;
+}
+
+// Rank IDs before loading user profiles and limits, so only this page needs
+// those rows. Include accounts without usage after the active users.
+export async function adminUsers(d1: D1Database, page: number): Promise<AdminUsers> {
+  const { results } = await d1.prepare(`
+    WITH totals AS (
+      SELECT user_id, SUM(requests) AS requests, SUM(input_tokens) AS inputTokens,
+        SUM(output_tokens) AS outputTokens, SUM(input_tokens + output_tokens) AS totalTokens,
+        SUM(club_charge_micro) AS clubChargeMicro, SUM(personal_charge_micro) AS personalChargeMicro,
+        SUM(cost_micro) AS costMicro, SUM(sessions) AS sessions
+      FROM usage_total GROUP BY user_id
+    ), ranked AS (
+      SELECT * FROM totals
+      UNION ALL
+      SELECT u.id, 0, 0, 0, 0, 0, 0, 0, 0
+      FROM user u WHERE NOT EXISTS (SELECT 1 FROM usage_total t WHERE t.user_id = u.id)
+      ORDER BY totalTokens DESC, user_id ASC
+      LIMIT ?1 OFFSET ?2
+    )
+    SELECT u.id, u.name, u.email, u.role,
+      ranked.requests, ranked.inputTokens, ranked.outputTokens, ranked.totalTokens,
+      ranked.clubChargeMicro, ranked.personalChargeMicro, ranked.costMicro, ranked.sessions,
+      l.five_hour_micro AS fiveHourMicro, l.weekly_micro AS weeklyMicro
+    FROM ranked
+    JOIN user u ON u.id = ranked.user_id
+    LEFT JOIN usage_limit l ON l.user_id = ranked.user_id
+    ORDER BY ranked.totalTokens DESC, ranked.user_id ASC
+  `).bind(ADMIN_PAGE_SIZE + 1, page * ADMIN_PAGE_SIZE).all<AdminUser>();
+  return { users: results.slice(0, ADMIN_PAGE_SIZE), page, hasMore: results.length > ADMIN_PAGE_SIZE };
+}
 
 export interface TokenLeaderboard {
   days: number;
@@ -34,7 +100,6 @@ export interface TokenLeaderboard {
 // what upstreams charged the club. Days are Central calendar days.
 export interface AdminUsage {
   days: number;
-  perUser: { userId: string; name: string; email: string; clubChargeMicro: number; personalChargeMicro: number; costMicro: number; sessions: number }[];
   perModel: { model: string; requests: number; inputTokens: number; outputTokens: number; chargeMicro: number; costMicro: number }[];
   history: { day: string; model: string; tokens: number; chargeMicro: number; costMicro: number }[];
   // Central time's current UTC offset in minutes east, for laying out the chart's days.
@@ -68,19 +133,16 @@ const LimitsBody = Schema.Struct({ fiveHourMicro: Limit, weeklyMicro: Limit });
 
 export const adminRoutes = Layer.mergeAll(
   HttpRouter.add("GET", "/api/admin/users", Effect.fn("listUsers")(function* () {
-    const users = yield* query((db) => db
-      .select({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        fiveHourMicro: usageLimit.fiveHourMicro,
-        weeklyMicro: usageLimit.weeklyMicro,
-      })
-      .from(user)
-      .leftJoin(usageLimit, eq(usageLimit.userId, user.id))
-      .orderBy(asc(user.email)));
-    return HttpServerResponse.jsonUnsafe(users satisfies User[]);
+    const params = yield* decodeQuery(Schema.Struct({ page: Schema.optional(Schema.String) }));
+    const value = Number(params.page ?? 0);
+    const page = Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000 ? value : 0;
+    const result = yield* query((db) => adminUsers(db.$client, page));
+    return HttpServerResponse.jsonUnsafe(result);
+  })),
+
+  HttpRouter.add("GET", "/api/admin/lifetime-usage", Effect.fn("adminLifetimeUsage")(function* () {
+    const result = yield* query((db) => lifetimeUsage(db.$client));
+    return HttpServerResponse.jsonUnsafe(result);
   })),
 
   // Cross-user usage over the last 7 or 30 Central days, powering the admin
@@ -89,26 +151,12 @@ export const adminRoutes = Layer.mergeAll(
     const params = yield* decodeQuery(UsageQuery);
     const days = params.days === "7" ? 7 : 30;
     const now = Date.now();
-    const [rows, users] = yield* query((db) => Promise.all([
-      dailyUsage(db.$client, { since: addDays(centralDay(now), -(days - 1)) }),
-      db.select({ id: user.id, name: user.name, email: user.email }).from(user),
-    ]));
-    const userById = new Map(users.map((row) => [row.id, row]));
+    const rows = yield* query((db) => dailyUsage(db.$client, { since: addDays(centralDay(now), -(days - 1)) }));
 
-    const perUser = new Map<string, AdminUsage["perUser"][number]>();
     const perModel = new Map<string, AdminUsage["perModel"][number]>();
     const history = new Map<string, AdminUsage["history"][number]>();
     for (const row of rows) {
       const charge = row.clubChargeMicro + row.personalChargeMicro;
-      const account = userById.get(row.userId);
-      if (account) {
-        const entry = perUser.get(row.userId) ?? { userId: row.userId, name: account.name, email: account.email, clubChargeMicro: 0, personalChargeMicro: 0, costMicro: 0, sessions: 0 };
-        entry.clubChargeMicro += row.clubChargeMicro;
-        entry.personalChargeMicro += row.personalChargeMicro;
-        entry.costMicro += row.costMicro;
-        entry.sessions += row.sessions;
-        perUser.set(row.userId, entry);
-      }
       const model = perModel.get(row.model) ?? { model: row.model, requests: 0, inputTokens: 0, outputTokens: 0, chargeMicro: 0, costMicro: 0 };
       model.requests += row.requests;
       model.inputTokens += row.inputTokens;
@@ -127,7 +175,6 @@ export const adminRoutes = Layer.mergeAll(
 
     return HttpServerResponse.jsonUnsafe({
       days,
-      perUser: [...perUser.values()].sort((a, b) => b.clubChargeMicro - a.clubChargeMicro),
       perModel: [...perModel.values()].sort((a, b) => b.chargeMicro - a.chargeMicro),
       history: [...history.values()],
       tzOffset: centralOffsetMinutes(now),

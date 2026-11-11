@@ -2,9 +2,10 @@ import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { DailyUsage, type ChartUnit } from "../components/daily-usage";
 import { useEffect, useState } from "react";
 import { getSession } from "../lib/session";
-import { getLumenUsage, listUsers } from "../lib/admin";
+import { getLifetimeUsage, getLumenUsage, listUsers } from "../lib/admin";
 import { getAdminUsage, updateUserLimits } from "../lib/usage";
 import { formatUsdMicro, localTimeZoneLabel } from "../lib/format";
+import type { AdminUsers, LumenUsage } from "../../../api/src/routes/admin";
 import { DataTable, TableBody, TableHead, Td, Th } from "../components/data-table";
 
 export const DEFAULT_FIVE_HOUR_LIMIT_MICRO = 10_000_000;
@@ -17,24 +18,24 @@ export const Route = createFileRoute("/_dashboard/admin")({
     if (session.user.role !== "admin") throw redirect({ to: "/" });
   },
   loader: async () => {
-    const [users, lumenUsage, adminUsage] = await Promise.all([
-      listUsers(),
-      getLumenUsage().then(
+    const [users, lifetimeUsage, adminUsage] = await Promise.all([
+      listUsers({ data: { page: 0 } }),
+      getLifetimeUsage().then(
         (usage) => ({ usage, error: null }),
-        (error: unknown) => ({ usage: null, error: error instanceof Error ? error.message : "Couldn't load Lumen usage." }),
+        (error: unknown) => ({ usage: null, error: error instanceof Error ? error.message : "Couldn't load lifetime usage." }),
       ),
       getAdminUsage({ data: { days: 30 } }).then(
         (usage) => ({ usage, error: null }),
         (error: unknown) => ({ usage: null, error: error instanceof Error ? error.message : "Couldn't load usage logs." }),
       ),
     ]);
-    return { users, lumenUsage, adminUsage };
+    return { users, lifetimeUsage, adminUsage };
   },
   component: Page,
 });
 
 function Page() {
-  const { users, lumenUsage: lumenResult, adminUsage } = Route.useLoaderData();
+  const { users, lifetimeUsage: lifetimeResult, adminUsage } = Route.useLoaderData();
   const [days, setDays] = useState(30);
   const [unit, setUnit] = useState<ChartUnit>("charge");
   const [adminResult, setAdminResult] = useState(adminUsage);
@@ -53,21 +54,16 @@ function Page() {
     ).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [days, adminUsage]);
-  const lumenUsage = lumenResult.usage;
-  const usageFields = lumenUsage && [
-    ["Requests", lumenUsage.requests.toLocaleString("en-US")],
-    ["Input tokens", lumenUsage.input_tokens.toLocaleString("en-US")],
-    ["Output tokens", lumenUsage.output_tokens.toLocaleString("en-US")],
-    ["Total tokens", lumenUsage.total_tokens.toLocaleString("en-US")],
-    ["Audio seconds", lumenUsage.audio_seconds.toLocaleString("en-US", { maximumFractionDigits: 6 })],
-    ["Coins spent", lumenUsage.cost.toLocaleString("en-US", { maximumFractionDigits: 8 })],
-    ["Coins available", lumenUsage.coins_available === -2 ? "Unlimited"
-      : lumenUsage.coins_available === null ? "No pool or blocked"
-        : lumenUsage.coins_available.toLocaleString("en-US", { maximumFractionDigits: 8 })],
-    ["Last used", lumenUsage.last_used_at === null ? "Never"
-      : new Intl.DateTimeFormat("en-US", {
-        dateStyle: "medium", timeStyle: "short",
-      }).format(new Date(lumenUsage.last_used_at)) + (localTimeZoneLabel(lumenUsage.last_used_at) ? ` ${localTimeZoneLabel(lumenUsage.last_used_at)}` : "")],
+  const lifetime = lifetimeResult.usage;
+  const usageFields = lifetime && [
+    ["Requests", lifetime.requests.toLocaleString("en-US")],
+    ["Input tokens", lifetime.inputTokens.toLocaleString("en-US")],
+    ["Output tokens", lifetime.outputTokens.toLocaleString("en-US")],
+    ["Total tokens", lifetime.totalTokens.toLocaleString("en-US")],
+    ["Club charges", formatUsdMicro(lifetime.clubChargeMicro)],
+    ["Personal charges", formatUsdMicro(lifetime.personalChargeMicro)],
+    ["Our cost", formatUsdMicro(lifetime.costMicro)],
+    ["Sessions", lifetime.sessions.toLocaleString("en-US")],
   ];
 
   return (
@@ -75,10 +71,10 @@ function Page() {
 
       <h1 className="mb-6 text-lg font-medium">Admin Panel</h1>
 
-      <section className="mb-6" aria-labelledby="lumen-usage-heading">
-        <h2 id="lumen-usage-heading" className="text-base font-medium">Lumen usage</h2>
+      <section className="mb-6" aria-labelledby="lifetime-usage-heading">
+        <h2 id="lifetime-usage-heading" className="text-base font-medium">Lifetime router usage</h2>
         <p className="mt-1 text-sm text-neutral-500">
-          Cumulative usage across all users sharing the router's Lumen API key. The available coin balance is shared across the Lumen account.
+          Recorded usage across all users and providers, including club and personal keys.
         </p>
         {usageFields ? (
           <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 bg-neutral-200 sm:grid-cols-4">
@@ -90,9 +86,12 @@ function Page() {
             ))}
           </dl>
         ) : (
-          <p role="alert" className="mt-4 text-sm text-red-700">{lumenResult.error} Reload the page to try again.</p>
+          <p role="alert" className="mt-4 text-sm text-red-700">{lifetimeResult.error} Reload the page to try again.</p>
         )}
       </section>
+
+      <ProviderUsage />
+      <UsersTable initial={users} />
 
       <section className="mb-6" aria-label="Router usage">
         {loading ? <p role="status" className="mt-4 text-sm text-neutral-500">Loading usage…</p> : adminResult.usage ? (
@@ -108,54 +107,6 @@ function Page() {
               title={unit === "charge" ? "Daily charges in coins" : unit === "cost" ? "Daily upstream cost in coins" : "Daily token usage"}
               description="Total usage across all users, including club and personal keys"
             />
-            <DataTable variant="users" minWidth={760} caption="Users with their roles, spend, and usage limits." className="mt-6">
-              <TableHead>
-                <Th pad="start" className="px-5">Name</Th>
-                <Th>Email</Th>
-                <Th>Role</Th>
-                <Th title="Charged at router prices, and what upstreams charged the club">Charged / our cost</Th>
-                <Th pad="end" className="px-5">Limits (5h / week)</Th>
-              </TableHead>
-              <TableBody
-                rows={users}
-                rowKey={(user) => user.id}
-                columns={5}
-                empty="No users yet."
-                renderRow={(user) => {
-                  const spend = adminResult.usage!.perUser.find((row) => row.userId === user.id);
-                  return (
-                    <>
-                      <Td pad="start" className="truncate px-5 text-neutral-800" title={user.name}>{user.name || "—"}</Td>
-                      <Td className="truncate" title={user.email}>{user.email}</Td>
-                      <Td>
-                        <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
-                      </Td>
-                      <Td className="whitespace-nowrap tabular-nums">
-                        {spend
-                          ? <>
-                              <span className="text-neutral-800">{formatUsdMicro(spend.clubChargeMicro)}</span>
-                              <span className="text-neutral-400" title="What upstreams charged the club"> / {formatUsdMicro(spend.costMicro)}</span>
-                              {spend.personalChargeMicro > 0 && (
-                                <span className="block text-xs text-neutral-400" title="Usage on the user's personal Lumen key, at router prices">
-                                  + {formatUsdMicro(spend.personalChargeMicro)} personal
-                                </span>
-                              )}
-                              <span className="block text-xs text-neutral-400">{spend.sessions.toLocaleString("en-US")} {spend.sessions === 1 ? "session" : "sessions"}</span>
-                            </>
-                          : "—"}
-                      </Td>
-                      <Td pad="end" className="px-5">
-                        <LimitsEditor
-                          userId={user.id}
-                          fiveHourMicro={user.fiveHourMicro}
-                          weeklyMicro={user.weeklyMicro}
-                        />
-                      </Td>
-                    </>
-                  );
-                }}
-              />
-            </DataTable>
 
             {adminResult.usage.perModel.length > 0 && (
               <DataTable variant="models-usage" minWidth={640} caption="Charges at router prices and upstream cost per model over the selected range." className="mt-6">
@@ -190,6 +141,141 @@ function Page() {
         )}
       </section>
     </section>
+  );
+}
+
+function UsersTable({ initial }: { initial: AdminUsers }) {
+  const [result, setResult] = useState(initial);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (page === 0) {
+      setResult(initial);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    void listUsers({ data: { page } }).then(
+      (users) => { if (!cancelled) setResult(users); },
+      (error: unknown) => { if (!cancelled) setError(error instanceof Error ? error.message : "Couldn't load users."); },
+    ).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, initial, retry]);
+
+  return (
+    <section className="mb-6" aria-labelledby="users-heading" aria-busy={loading}>
+      <h2 id="users-heading" className="text-base font-medium">Users</h2>
+      <p className="mt-1 text-sm text-neutral-500">Sorted by lifetime tokens, highest first. Spend and sessions are lifetime totals.</p>
+      <DataTable variant="users" minWidth={920} caption="Users ranked by lifetime token usage, with lifetime spend and usage limits." className="mt-6">
+        <TableHead>
+          <Th pad="start" className="px-5">Name</Th>
+          <Th>Email</Th>
+          <Th>Role</Th>
+          <Th>Lifetime tokens</Th>
+          <Th title="Charged at router prices, and what upstreams charged the club">Charged / our cost</Th>
+          <Th pad="end" className="px-5">Limits (5h / week)</Th>
+        </TableHead>
+        <TableBody
+          rows={result.users}
+          rowKey={(user) => user.id}
+          columns={6}
+          empty="No users yet."
+          renderRow={(user) => (
+            <>
+              <Td pad="start" className="truncate px-5 text-neutral-800" title={user.name}>{user.name || "—"}</Td>
+              <Td className="truncate" title={user.email}>{user.email}</Td>
+              <Td>
+                <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
+              </Td>
+              <Td className="tabular-nums">{user.totalTokens.toLocaleString("en-US")}</Td>
+              <Td className="whitespace-nowrap tabular-nums">
+                <span className="text-neutral-800">{formatUsdMicro(user.clubChargeMicro)}</span>
+                <span className="text-neutral-400" title="What upstreams charged the club"> / {formatUsdMicro(user.costMicro)}</span>
+                {user.personalChargeMicro > 0 && (
+                  <span className="block text-xs text-neutral-400" title="Usage on the user's personal key, at router prices">
+                    + {formatUsdMicro(user.personalChargeMicro)} personal
+                  </span>
+                )}
+                <span className="block text-xs text-neutral-400">{user.sessions.toLocaleString("en-US")} {user.sessions === 1 ? "session" : "sessions"}</span>
+              </Td>
+              <Td pad="end" className="px-5">
+                <LimitsEditor
+                  key={`${user.id}:${user.fiveHourMicro}:${user.weeklyMicro}`}
+                  userId={user.id}
+                  fiveHourMicro={user.fiveHourMicro}
+                  weeklyMicro={user.weeklyMicro}
+                />
+              </Td>
+            </>
+          )}
+        />
+      </DataTable>
+      <div className="mt-3 flex items-center justify-between text-sm">
+        <button type="button" disabled={loading || result.page === 0} onClick={() => setPage(result.page - 1)} className="rounded border border-neutral-200 px-3 py-1.5 disabled:opacity-40">Previous</button>
+        <span role="status" className="text-neutral-500">{loading ? "Loading users…" : `Page ${result.page + 1}`}</span>
+        <button type="button" disabled={loading || !result.hasMore} onClick={() => setPage(result.page + 1)} className="rounded border border-neutral-200 px-3 py-1.5 disabled:opacity-40">Next</button>
+      </div>
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error} <button type="button" className="underline" onClick={() => setRetry((value) => value + 1)}>Retry</button></p>}
+    </section>
+  );
+}
+
+function ProviderUsage() {
+  const [open, setOpen] = useState(false);
+  const [lumenUsage, setLumenUsage] = useState<LumenUsage | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      setLumenUsage(await getLumenUsage());
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Couldn't load Lumen usage.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const usageFields = lumenUsage && [
+    ["Requests", lumenUsage.requests.toLocaleString("en-US")],
+    ["Input tokens", lumenUsage.input_tokens.toLocaleString("en-US")],
+    ["Output tokens", lumenUsage.output_tokens.toLocaleString("en-US")],
+    ["Total tokens", lumenUsage.total_tokens.toLocaleString("en-US")],
+    ["Audio seconds", lumenUsage.audio_seconds.toLocaleString("en-US", { maximumFractionDigits: 6 })],
+    ["Coins spent", lumenUsage.cost.toLocaleString("en-US", { maximumFractionDigits: 8 })],
+    ["Coins available", lumenUsage.coins_available === -2 ? "Unlimited"
+      : lumenUsage.coins_available === null ? "No pool or blocked"
+        : lumenUsage.coins_available.toLocaleString("en-US", { maximumFractionDigits: 8 })],
+    ["Last used", lumenUsage.last_used_at === null ? "Never"
+      : new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium", timeStyle: "short",
+      }).format(new Date(lumenUsage.last_used_at)) + (localTimeZoneLabel(lumenUsage.last_used_at) ? ` ${localTimeZoneLabel(lumenUsage.last_used_at)}` : "")],
+  ];
+
+  return (
+    <details className="mb-6 rounded-xl border border-neutral-200 p-4" onToggle={(event) => {
+      const expanded = event.currentTarget.open;
+      setOpen(expanded);
+      if (expanded && !lumenUsage && !loading) void load();
+    }}>
+      <summary className="cursor-pointer text-sm font-medium">Lumen account usage</summary>
+      {open && <div className="mt-4">
+        <p className="mt-2 text-xs text-neutral-500">Reported by Lumen for the shared account. Includes activity outside this router.</p>
+        {loading ? <p role="status" className="mt-3 text-sm text-neutral-500">Loading Lumen usage…</p> : error ? <p role="alert" className="mt-3 text-sm text-red-700">{error} <button type="button" className="underline" onClick={() => void load()}>Retry</button></p> : usageFields && (
+          <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {usageFields.map(([label, value]) => <div key={label}><dt className="text-xs text-neutral-500">{label}</dt><dd className="mt-2 break-words text-sm tabular-nums">{value}</dd></div>)}
+          </dl>
+        )}
+      </div>}
+    </details>
   );
 }
 

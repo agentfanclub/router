@@ -112,6 +112,35 @@
       "sarvam"
     ]
   },
+  "glm-5.3-flash": {
+    "id": "glm5.3-flash",
+    "name": "GLM-5.3 Flash",
+    "attachment": false,
+    "reasoning": true,
+    "tool_call": true,
+    "limit": {
+      "context": 131072,
+      "output": 16384
+    },
+    "cost": {
+      "input": 0.256856,
+      "output": 0.930653,
+      "cache_read": 0.256856,
+      "cache_write": 0
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "upstreams": [
+      "sarvam"
+    ]
+  },
   "qwen3.8-flash": {
     "id": "qwen3.8-flash",
     "name": "Qwen3.8 Flash",

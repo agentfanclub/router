@@ -39,7 +39,7 @@
 }
 
 .users-table tr {
-  grid-template-columns: minmax(120px, 1fr) minmax(200px, 2fr) 84px 170px 190px;
+  grid-template-columns: minmax(100px, 1fr) minmax(180px, 1.5fr) 72px 120px 154px 190px;
 }
 
 .logs-table tr {

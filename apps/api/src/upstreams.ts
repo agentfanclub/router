@@ -12,6 +12,7 @@ interface Upstream {
   // Each request picks one at random, which spreads load across per-key
   // rate limits.
   keysSecret: "LUMEN_API_KEYS" | "SARVAM_API_KEY";
+  authHeaders: (key: string) => Record<string, string>;
   // Adjusts the outgoing chat body for provider quirks.
   prepareBody?: (body: Record<string, unknown>) => void;
 }
@@ -21,11 +22,13 @@ export const upstreams: Record<UpstreamId, Upstream> = {
     name: "Lumen",
     url: "https://lumen.ncsa.illinois.edu/v1/chat/completions",
     keysSecret: "LUMEN_API_KEYS",
+    authHeaders: (key) => ({ authorization: `Bearer ${key}` }),
   },
   sarvam: {
     name: "Sarvam",
-    url: "https://api.sarvam.ai/v1/chat/completions",
+    url: "https://api.sarvam.ai/v2/chat/completions",
     keysSecret: "SARVAM_API_KEY",
+    authHeaders: (key) => ({ "api-subscription-key": key }),
     prepareBody(body) {
       // Sarvam only understands max_tokens, and reasons at length unless
       // given an effort. Reasoning tokens are billed as output.
@@ -33,7 +36,8 @@ export const upstreams: Record<UpstreamId, Upstream> = {
         body.max_tokens = body.max_completion_tokens;
       }
       delete body.max_completion_tokens;
-      body.reasoning_effort ??= "medium";
+      // GLM accepts low/high/max, while Sarvam 105B also accepts medium.
+      body.reasoning_effort ??= body.model === "glm5.3-flash" ? "low" : "medium";
     },
   },
 };

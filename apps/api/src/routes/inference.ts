@@ -189,7 +189,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
     return Effect.tryPromise(() => fetch(upstream.url, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${key}`,
+        ...upstream.authHeaders(key),
         "content-type": "application/json",
         accept: request.headers.accept ?? "application/json",
         "x-opencode-session": sessionId,

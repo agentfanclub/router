@@ -112,14 +112,14 @@
       "sarvam"
     ]
   },
-  "glm-5.3-flash": {
+  "glm5.3-flash": {
     "id": "glm5.3-flash",
     "name": "GLM-5.3 Flash",
     "attachment": false,
     "reasoning": true,
     "tool_call": true,
     "limit": {
-      "context": 131072,
+      "context": 1000000,
       "output": 16384
     },
     "cost": {

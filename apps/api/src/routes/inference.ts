@@ -6,7 +6,7 @@ import type { DenyReason, UsageSnapshot } from "../do/user-usage";
 import { OpenAiError } from "../http";
 import { ApiKeyIdentity, inferenceKeyAuth } from "../middleware/api-key-auth";
 import { query, UsageCoordinator, WorkerEnv, WorkerExecution } from "../services";
-import { catalog, upstreamKeys, upstreams, type CatalogModel, type ModelCost, type UpstreamRoute } from "../upstreams";
+import { catalog, modelUpstream, upstreamKeys, upstreams, type CatalogModel, type ModelCost, type UpstreamRoute } from "../upstreams";
 import { decryptSecret } from "../util/secret-box";
 import { usageCaptureTransform } from "../util/sse-usage";
 import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
@@ -66,7 +66,12 @@ const toPrice = (cost: ModelCost): RoutePrice => ({ input: cost.input, output: c
 // What the club pays for a request on `route`. The user's own key costs the club nothing.
 function upstreamPrice(model: CatalogModel, route: UpstreamRoute): RoutePrice {
   if (route === "byok") return { input: 0, output: 0, cacheRead: 0 };
-  return toPrice(model.upstream_cost?.[route] ?? model.cost);
+  return toPrice(modelUpstream(model, route)?.cost ?? model.cost);
+}
+
+function upstreamCostMicro(model: CatalogModel, route: UpstreamRoute, usage: ParsedUsage): number {
+  if (route === "opencode-go" && usage.reportedCostMicro !== undefined) return usage.reportedCostMicro;
+  return computeCostMicro(usage, upstreamPrice(model, route));
 }
 
 const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerRequest.HttpServerRequest) {
@@ -96,8 +101,9 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
 
   // Club upstreams serving the model with a configured key, in priority
   // order, then the user's own key when it can serve the model.
-  const routes: UpstreamRoute[] = model.upstreams.filter((id) => upstreamKeys(env, id).length > 0);
-  if (identity.byok && env.BYOK_ENCRYPTION_KEY && model.upstreams.includes("lumen")) routes.push("byok");
+  const clubUpstreams = model.upstreams.filter(({ provider }) => upstreamKeys(env, provider).length > 0);
+  const routes: UpstreamRoute[] = clubUpstreams.map(({ provider }) => provider);
+  if (identity.byok && env.BYOK_ENCRYPTION_KEY && modelUpstream(model, "byok")) routes.push("byok");
   if (routes.length === 0) {
     console.error({ event: "inference_no_upstream", ...logContext });
     return yield* chatError(503, "no_upstream", "No upstream is currently available to serve this request.", requestId);
@@ -111,6 +117,9 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
     model: chat.model,
     createdAt: startedAt,
     routes,
+    upstreamWeights: clubUpstreams[0]?.weight === undefined
+      ? undefined
+      : Object.fromEntries(clubUpstreams.map(({ provider, weight }) => [provider, weight])),
     reserveMicro: estimateCostMicro({
       inputEstimateTokens: Math.ceil(text.length / 4),
       maxOutputTokens: Math.min(chat.maxTokens ?? model.limit.output, model.limit.output),
@@ -141,7 +150,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
       requestId, route, status, durationMs,
       usage: parsed,
       chargeMicro: parsed ? computeCostMicro(parsed, price) : 0,
-      costMicro: parsed ? computeCostMicro(parsed, upstreamPrice(model, route)) : 0,
+      costMicro: parsed ? upstreamCostMicro(model, route, parsed) : 0,
       limits: identity.limits,
     });
     const pending = Effect.runPromise(settle.pipe(
@@ -177,7 +186,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   let attempt = 0;
   const send = (candidate: UpstreamRoute, key: string) => {
     const upstream = upstreams[candidate === "byok" ? "lumen" : candidate];
-    const body = { ...chat.raw };
+    const body: Record<string, unknown> = { ...chat.raw, model: modelUpstream(model, candidate)?.slug ?? chat.model };
     // Streams always ask for usage so real token counts back the accounting.
     // The extra usage chunk is hidden from clients that did not ask for it.
     if (chat.stream) body.stream_options = { ...(body.stream_options as object | undefined), include_usage: true };
@@ -193,6 +202,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
         "content-type": "application/json",
         accept: request.headers.accept ?? "application/json",
         "x-opencode-session": sessionId,
+        ...(upstream.userAgent ? { "user-agent": upstream.userAgent } : {}),
       },
       body: JSON.stringify(body),
       signal,
@@ -259,8 +269,14 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   }
 
   const served = upstream;
-  const respond = (body: BodyInit | null) => {
+  const upstreamSlug = modelUpstream(model, route)?.slug;
+  const publicModel = upstreamSlug !== undefined && upstreamSlug !== chat.model ? chat.model : undefined;
+  const respond = (body: BodyInit | null, rewritten = false) => {
     const headers = new Headers(served.headers);
+    if (rewritten) {
+      headers.delete("content-length");
+      headers.delete("content-encoding");
+    }
     headers.set("x-router-session", sessionId);
     headers.set("x-router-request-id", requestId);
     return HttpServerResponse.fromWeb(new Response(body, { status: served.status, headers }));
@@ -268,7 +284,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
 
   if (!served.ok || !served.body) {
     const errorText = yield* Effect.promise(() => served.text().catch(() => ""));
-    console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(jsonField(errorText, "error")) });
+    console.error({ event: "upstream_http_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(jsonObject(errorText)?.error) });
     yield* settleNow("error");
     return respond(errorText || null);
   }
@@ -281,9 +297,13 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
       yield* settleNow(signal.aborted ? "aborted" : "error");
       return yield* chatError(502, "upstream_unreachable", "Unable to read the upstream response.", requestId);
     }
-    const error = jsonField(responseText, "error");
+    const response = jsonObject(responseText);
+    const error = response?.error;
     if (error) console.error({ event: "upstream_body_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(error) });
-    yield* settleNow(error ? "error" : "ok", parseOpenAiUsage(jsonField(responseText, "usage")));
+    yield* settleNow(error ? "error" : "ok", parseOpenAiUsage(response?.usage));
+    if (publicModel && typeof response?.model === "string" && response.model !== publicModel) {
+      return respond(JSON.stringify({ ...response, model: publicModel }), true);
+    }
     return respond(responseText);
   }
 
@@ -291,6 +311,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
   // and settled before the terminal events reach the client.
   const capture = usageCaptureTransform({
     clientWantsUsage: chat.clientWantsUsage,
+    publicModel,
     onError: (error) => console.error({ event: "upstream_stream_error", ...logContext, route, upstreamStatus: served.status, ...upstreamErrorFields(error) }),
     onFinish: finish,
   });
@@ -302,7 +323,7 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
     await capture.finish("aborted");
   });
   execution.waitUntil(pump);
-  return respond(output.readable);
+  return respond(output.readable, publicModel !== undefined);
 });
 
 function limitReached(reason: DenyReason, snapshot: UsageSnapshot, requestId: string) {
@@ -326,10 +347,10 @@ function limitReached(reason: DenyReason, snapshot: UsageSnapshot, requestId: st
   });
 }
 
-function jsonField(text: string, field: string): unknown {
+function jsonObject(text: string): Record<string, unknown> | undefined {
   try {
     const value: unknown = JSON.parse(text);
-    return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
+    return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
   } catch {
     return undefined;
   }

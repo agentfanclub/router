@@ -24,7 +24,7 @@
       ]
     },
     "upstreams": [
-      "lumen"
+      { "provider": "lumen" }
     ]
   },
   "deepseek-v4.1-flash": {
@@ -53,7 +53,7 @@
       ]
     },
     "upstreams": [
-      "lumen"
+      { "provider": "lumen" }
     ]
   },
   "glm-5.3": {
@@ -67,6 +67,12 @@
       "output": 131072
     },
     "cost": {
+      "input": 0.6607065,
+      "output": 2.124159,
+      "cache_read": 0.6607065,
+      "cache_write": 0
+    },
+    "previous_cost": {
       "input": 1.321413,
       "output": 4.248318,
       "cache_read": 1.321413,
@@ -81,7 +87,17 @@
       ]
     },
     "upstreams": [
-      "lumen"
+      {
+        "provider": "lumen",
+        "weight": 30,
+        "cost": { "input": 1.321413, "output": 4.248318, "cache_read": 1.321413, "cache_write": 0 }
+      },
+      {
+        "provider": "opencode-go",
+        "slug": "glm-5.3",
+        "weight": 70,
+        "cost": { "input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_write": 0 }
+      }
     ]
   },
   "sarvam-105b": {
@@ -109,7 +125,7 @@
       ]
     },
     "upstreams": [
-      "sarvam"
+      { "provider": "sarvam" }
     ]
   },
   "glm5.3-flash": {
@@ -138,7 +154,7 @@
       ]
     },
     "upstreams": [
-      "sarvam"
+      { "provider": "sarvam" }
     ]
   },
   "qwen3.8-flash": {
@@ -167,7 +183,7 @@
       ]
     },
     "upstreams": [
-      "lumen"
+      { "provider": "lumen" }
     ]
   }
 }

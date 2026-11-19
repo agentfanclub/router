@@ -5,6 +5,8 @@ export interface Secrets {
   LUMEN_API_KEYS: string;
   // Optional: unset simply leaves Sarvam unavailable as a club upstream.
   SARVAM_API_KEY?: string;
+  // Optional: enables OpenCode Go as a club upstream.
+  OPENCODE_GO_API_KEY?: string;
   // Optional: user-supplied Lumen keys cannot be stored without it.
   BYOK_ENCRYPTION_KEY?: string;
   BETTER_AUTH_SECRET: string;

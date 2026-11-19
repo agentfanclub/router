@@ -35,6 +35,7 @@ export interface ParsedUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  reportedCostMicro?: number;
 }
 
 export function computeCostMicro(usage: ParsedUsage, price: RoutePrice): number {
@@ -71,10 +72,12 @@ export function parseOpenAiUsage(raw: unknown): ParsedUsage | null {
   const cachedRaw = details && typeof details === "object"
     ? numberField((details as Record<string, unknown>).cached_tokens)
     : null;
+  const reportedCost = numberField(record.cost);
   return {
     inputTokens,
     outputTokens,
     cachedTokens: Math.min(cachedRaw ?? 0, inputTokens),
+    ...(reportedCost === null ? {} : { reportedCostMicro: Math.round(reportedCost * 1_000_000) }),
   };
 }
 

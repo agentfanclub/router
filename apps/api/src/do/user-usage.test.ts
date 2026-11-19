@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, mock, test } from "bun:test";
-import type { UpstreamRoute } from "../upstreams";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+import type { UpstreamRoute, UpstreamWeights } from "../upstreams";
 
 mock.module("cloudflare:workers", () => ({
   DurableObject: class {
@@ -32,6 +32,7 @@ const LIMITS = { fiveHourMicro: 10_000_000, weeklyMicro: 50_000_000 };
 
 function admit(usage: InstanceType<typeof UserUsage>, overrides: {
   routes?: UpstreamRoute[];
+  upstreamWeights?: UpstreamWeights;
   reserveMicro?: number;
   sessionId?: string;
   requestId?: string;
@@ -44,6 +45,7 @@ function admit(usage: InstanceType<typeof UserUsage>, overrides: {
     model: "test-model",
     createdAt: Date.now(),
     routes: overrides.routes ?? ["lumen"],
+    upstreamWeights: overrides.upstreamWeights,
     reserveMicro: overrides.reserveMicro ?? 1_000,
     limits: LIMITS,
   });
@@ -104,6 +106,29 @@ describe("admission", () => {
     await admit(usage, { sessionId, routes: ["sarvam"] });
     expect(await admit(usage, { sessionId, routes: ["lumen", "sarvam"] })).toMatchObject({ route: "sarvam" });
     expect(await admit(usage, { sessionId, routes: ["lumen"] })).toMatchObject({ route: "lumen" });
+  });
+
+  test("weights choose the initial route and subsequent requests keep that route", async () => {
+    const usage = makeInstance();
+    const routes: UpstreamRoute[] = ["lumen", "sarvam", "byok"];
+    const options = { routes, upstreamWeights: { lumen: 70, sarvam: 30 } };
+    const sessionId = "ses_0123456789abcdef";
+    const random = spyOn(Math, "random").mockReturnValue(0.7);
+    try {
+      expect(await admit(usage, { ...options, sessionId })).toMatchObject({ route: "sarvam" });
+      random.mockReturnValue(0.69);
+      expect(await admit(usage, { ...options, sessionId })).toMatchObject({ route: "sarvam" });
+      expect(await admit(usage, options)).toMatchObject({ route: "lumen" });
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  test("a zero-weight route can serve when the weighted upstream is unavailable", async () => {
+    const usage = makeInstance();
+    const upstreamWeights = { lumen: 0, sarvam: 100 };
+    expect(await admit(usage, { upstreamWeights, routes: ["lumen", "sarvam"] })).toMatchObject({ route: "sarvam" });
+    expect(await admit(usage, { upstreamWeights, routes: ["lumen", "byok"] })).toMatchObject({ route: "lumen" });
   });
 });
 

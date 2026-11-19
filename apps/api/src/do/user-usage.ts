@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { ApiEnv } from "../env";
 import { usageWriteStatements, type UsageRecord } from "../usage-aggregates";
-import type { UpstreamRoute } from "../upstreams";
+import { pickClubUpstream, type UpstreamRoute, type UpstreamWeights } from "../upstreams";
 import type { ParsedUsage, UsageLimits } from "../util/usage";
 
 export type DenyReason = "five_hour_cap" | "weekly_cap";
@@ -28,6 +28,7 @@ export interface AdmitInput {
   createdAt: number;
   // Available routes in priority order. Never empty.
   routes: UpstreamRoute[];
+  upstreamWeights?: UpstreamWeights;
   // Worst-case cost of the request on a club route.
   reserveMicro: number;
   limits: UsageLimits;
@@ -154,7 +155,7 @@ export class UserUsage extends DurableObject<ApiEnv> {
         : snapshot.weekly.usedMicro + snapshot.pendingMicro >= snapshot.weekly.limitMicro ? "weekly_cap"
           : null;
 
-    const clubRoutes: UpstreamRoute[] = input.routes.filter((route) => route !== "byok");
+    const clubRoutes = input.routes.filter((route) => route !== "byok");
     const hasByok = input.routes.includes("byok");
     let route: UpstreamRoute | null;
     if (reason) {
@@ -163,7 +164,9 @@ export class UserUsage extends DurableObject<ApiEnv> {
     } else {
       // Stay on the session's current route so prompt caches stay warm.
       const sticky = this.stickyRoute(input.sessionId, now);
-      route = sticky && clubRoutes.includes(sticky) ? sticky : clubRoutes[0] ?? "byok";
+      route = sticky && sticky !== "byok" && clubRoutes.includes(sticky)
+        ? sticky
+        : pickClubUpstream(clubRoutes, input.upstreamWeights) ?? "byok";
     }
 
     if (!route) {

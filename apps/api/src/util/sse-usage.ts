@@ -3,8 +3,9 @@ import { parseOpenAiUsage } from "./usage";
 
 // Capture terminal events before forwarding them. Clients can stop reading as
 // soon as they receive [DONE], without waiting for the HTTP body to close.
-export function usageCaptureTransform({ clientWantsUsage, onFinish, onError }: {
+export function usageCaptureTransform({ clientWantsUsage, publicModel, onFinish, onError }: {
   clientWantsUsage: boolean;
+  publicModel?: string;
   onFinish: (status: "ok" | "error" | "aborted", usage: ParsedUsage | null) => Promise<void>;
   onError: (error: unknown) => void;
 }): { transform: TransformStream<Uint8Array, Uint8Array>; finish: (status: "ok" | "error" | "aborted") => Promise<void> } {
@@ -33,7 +34,7 @@ export function usageCaptureTransform({ clientWantsUsage, onFinish, onError }: {
       return output;
     }
     const errorEvent = lines.some((line) => /^event:\s*error\s*$/.test(line));
-    let parsed: { usage?: unknown; choices?: { finish_reason?: unknown }[]; error?: unknown } = {};
+    let parsed: { model?: unknown; usage?: unknown; choices?: { finish_reason?: unknown }[]; error?: unknown } = {};
     if (data) {
       try {
         const value: unknown = JSON.parse(data);
@@ -50,6 +51,11 @@ export function usageCaptureTransform({ clientWantsUsage, onFinish, onError }: {
     }
     if (!clientWantsUsage && Array.isArray(parsed.choices) && parsed.choices.length === 0 && parsed.usage !== undefined && parsed.error == null) {
       return "";
+    }
+    if (publicModel && typeof parsed.model === "string" && parsed.model !== publicModel) {
+      const fields = lines.filter((line) => !line.startsWith("data:"));
+      fields.push(`data: ${JSON.stringify({ ...parsed, model: publicModel })}`);
+      raw = fields.join("\n");
     }
     // Tool-call clients may close at finish_reason before reading usage.
     // Hold that event and everything after it until accounting is complete.

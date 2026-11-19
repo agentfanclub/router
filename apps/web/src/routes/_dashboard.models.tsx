@@ -13,6 +13,12 @@ const features = {
 };
 
 const priceFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const priceColumns = [
+  { field: "input", label: "Input" },
+  { field: "output", label: "Output" },
+  { field: "cache_read", label: "Cache Read" },
+  { field: "cache_write", label: "Cache Write" },
+] as const;
 
 export const Route = createFileRoute("/_dashboard/models")({
   loader: () => listModels(),
@@ -44,7 +50,7 @@ function Page() {
           <TableHead>
             <Th pad="start" className="px-6">Model</Th>
             <Th>Features</Th>
-            {["Input", "Output", "Cache Read", "Cache Write"].map((label) => (
+            {priceColumns.map(({ label }) => (
               <Th key={label} align="right" className="whitespace-nowrap px-4 last:pr-6">{label}</Th>
             ))}
           </TableHead>
@@ -116,11 +122,22 @@ function Page() {
                     );
                   })}
                 </Td>
-                {[model.cost.input, model.cost.output, model.cost.cache_read, model.cost.cache_write].map((price, index) => (
-                  <Td key={index} align="right" className="px-4 tabular-nums last:pr-6">
-                    {price == null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : priceFormatter.format(price)}
-                  </Td>
-                ))}
+                {priceColumns.map(({ field }) => {
+                  const price = model.cost[field];
+                  const previousPrice = model.previous_cost?.[field];
+                  return (
+                    <Td key={field} align="right" className="px-4 tabular-nums last:pr-6">
+                      {price == null ? <span aria-label="Not available" className="inline-flex align-middle text-neutral-400"><Minus size={14} aria-hidden="true" /></span> : (
+                        <>
+                          {previousPrice != null && previousPrice !== price && (
+                            <del className="block text-xs text-neutral-500"><span className="sr-only">Previous price </span>{priceFormatter.format(previousPrice)}</del>
+                          )}
+                          <span>{priceFormatter.format(price)}</span>
+                        </>
+                      )}
+                    </Td>
+                  );
+                })}
               </>
             )}
           />

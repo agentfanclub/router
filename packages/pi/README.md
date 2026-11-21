@@ -35,6 +35,12 @@ through each client's native discovery hook. Names, limits, modalities, reasonin
 support, and costs per million tokens come from the API catalog. Cache reads use
 the input price, and cache writes cost zero.
 
+While an Agent Fan Club model is selected, the footer shows the current five-hour
+and weekly allowance usage, for example `AFC 5h 42% · 7d 12%`. Run `/afc` for the
+full breakdown, including reset times and in-flight reservations. The extension
+reads usage from `GET /api/usage/limits` with the saved API key; dollar limits are
+not exposed.
+
 For local development, run the API and web app, apply the D1 migrations, and set
 `BETTER_AUTH_URL` in the API's `.dev.vars` to the web origin. Point the extension
 at the API origin when starting the client:

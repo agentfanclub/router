@@ -1,4 +1,5 @@
 import { Show, createSignal } from "solid-js";
+import { jsx } from "@opentui/solid/jsx-runtime";
 import { Plugin } from "@opencode/plugin/tui";
 import { AfcUsage } from "./rpc";
 import { formatCompact, formatDetails, usageSeverity, type PublicUsage } from "./usage";
@@ -55,13 +56,14 @@ export default Plugin.define({
       return context.theme.text.muted;
     }
 
-    const status = () => (
-      <Show when={usage()} keyed>
-        {(current: PublicUsage) => (
-          <text fg={severityColor(current)}>{formatCompact(current)}</text>
-        )}
-      </Show>
-    );
+    const status = () => Show({
+      get when() { return usage(); },
+      keyed: true,
+      children: (current: PublicUsage) => jsx("text", {
+        get fg() { return severityColor(current); },
+        get children() { return formatCompact(current); },
+      }),
+    });
 
     const stops = [
       context.ui.slot({ append: "prompt.footer.status", render: status }),

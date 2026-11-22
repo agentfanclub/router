@@ -1,12 +1,12 @@
 {
   "name": "@agentfanclub/opencode",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Agent Fan Club plugin for OpenCode v2",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./rpc": "./src/rpc.ts",
-    "./tui": "./src/tui.tsx"
+    "./tui": "./src/tui.ts"
   },
   "files": [
     "index.ts",

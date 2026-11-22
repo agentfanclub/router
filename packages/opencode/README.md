@@ -23,7 +23,7 @@ To load the npm package, add it to your OpenCode config:
 
 ```json
 {
-  "plugins": ["@agentfanclub/opencode@0.2.0"]
+  "plugins": ["@agentfanclub/opencode@0.2.1"]
 }
 ```
 

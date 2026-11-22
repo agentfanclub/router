@@ -1,8 +1,9 @@
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { createProvider } from "./provider";
+import { installUsageUI, type UsageApi, type UsageContext } from "./ui";
 
 export default function (pi: ExtensionAPI) {
-  const { baseUrl, oauth, fetchModels } = createProvider("pi");
+  const { baseUrl, oauth, fetchModels, fetchUsage } = createProvider("pi");
   pi.registerProvider("agentfanclub", {
     name: "Agent Fan Club",
     baseUrl,
@@ -17,4 +18,9 @@ export default function (pi: ExtensionAPI) {
       return fetchModels(token, context.signal);
     },
   } satisfies ProviderConfig);
+
+  const usage = installUsageUI(pi as unknown as UsageApi, fetchUsage);
+  pi.on("model_select", (_event, ctx) => {
+    void usage.refresh(ctx as unknown as UsageContext);
+  });
 }

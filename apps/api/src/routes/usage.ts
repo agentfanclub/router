@@ -1,23 +1,22 @@
 import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
-import type { UsageSnapshot } from "../do/user-usage";
 import { usageLimit, usageLog, usageTotal } from "../db/schema";
 import { ApiError, decodeQuery } from "../http";
+import { ApiKeyIdentity, inferenceKeyAuth } from "../middleware/api-key-auth";
 import { UserSession, userAuth } from "../middleware/user-auth";
 import { query, UsageCoordinator } from "../services";
 import { dailyUsage } from "../usage-aggregates";
 import { addDays, centralDay, centralOffsetMinutes } from "../util/timezone";
 import { DEFAULT_FIVE_HOUR_LIMIT_MICRO, DEFAULT_WEEKLY_LIMIT_MICRO, type UsageLimits } from "../util/usage";
+import { publicUsage, type PublicUsage } from "../util/usage-public";
 
 export type UsageLogRow = Pick<
   typeof usageLog.$inferSelect,
   "id" | "sessionId" | "model" | "upstream" | "billed" | "inputTokens" | "outputTokens" | "cachedTokens" | "chargeMicro" | "estimated" | "status" | "durationMs" | "createdAt"
 >;
 
-export interface UsageStatus {
-  fiveHour: { usedPercent: number; pendingPercent: number; resetsInMs: number };
-  weekly: { usedPercent: number; pendingPercent: number; resetsInMs: number };
+export interface UsageStatus extends PublicUsage {
   // The 7 and 30 day figures are Central calendar days, including today.
   tokens: { lifetime: number; last24Hours: number; last7Days: number; last30Days: number };
   // Sparse daily model totals for the last 30 Central calendar days. The chart fills gaps.
@@ -77,7 +76,22 @@ const LogsQuery = Schema.Struct({
   model: Schema.optional(Schema.String),
 });
 
-export const usageRoutes = Layer.mergeAll(
+// API-key authenticated usage for command-line clients. Only percentages and
+// reset timing leave the server; dollar limits stay internal.
+export const usageLimitsRoute = HttpRouter.add("GET", "/api/usage/limits", Effect.fn("usageLimits")(function* () {
+  const identity = yield* ApiKeyIdentity;
+  const usage = yield* UsageCoordinator;
+
+  const windows = yield* usage.status(identity.userId, identity.limits).pipe(
+    Effect.mapError(() => new ApiError({ status: 503, message: "Unable to load usage right now." })),
+  );
+
+  return HttpServerResponse.jsonUnsafe(publicUsage(windows), {
+    headers: { "Cache-Control": "no-store" },
+  });
+})).pipe(Layer.provide(inferenceKeyAuth));
+
+const sessionUsageRoutes = Layer.mergeAll(
   // Public allowance percentages and recorded token usage. Dollar limits stay internal.
   HttpRouter.add("GET", "/api/usage/me", Effect.fn("myUsage")(function* () {
     const session = yield* UserSession;
@@ -125,14 +139,8 @@ export const usageRoutes = Layer.mergeAll(
       perModel.set(row.model, model);
     }
 
-    const publicWindow = (window: UsageSnapshot["fiveHour"]) => ({
-      usedPercent: window.limitMicro > 0 ? window.usedMicro / window.limitMicro * 100 : 100,
-      pendingPercent: window.limitMicro > 0 ? windows.pendingMicro / window.limitMicro * 100 : 0,
-      resetsInMs: window.resetsInMs,
-    });
     return HttpServerResponse.jsonUnsafe({
-      fiveHour: publicWindow(windows.fiveHour),
-      weekly: publicWindow(windows.weekly),
+      ...publicUsage(windows),
       tokens,
       history: [...history.values()],
       perModel: [...perModel.values()].sort((a, b) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens)),
@@ -205,3 +213,5 @@ export const usageRoutes = Layer.mergeAll(
     return HttpServerResponse.jsonUnsafe({ logs: logs.slice(0, limit), nextOffset: logs.length > limit ? offset + limit : null } satisfies UsageLogFeed);
   })),
 ).pipe(Layer.provide(userAuth));
+
+export const usageRoutes = Layer.mergeAll(usageLimitsRoute, sessionUsageRoutes);

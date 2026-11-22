@@ -23,7 +23,7 @@ To load the npm package, add it to your OpenCode config:
 
 ```json
 {
-  "plugins": ["@agentfanclub/opencode@0.1.0"]
+  "plugins": ["@agentfanclub/opencode@0.2.0"]
 }
 ```
 
@@ -72,5 +72,14 @@ and redemption creates the API key and consumes the request in one transaction.
 Model discovery reads the catalog's names, context and output limits, costs per
 million tokens, modalities, and tool support. It refreshes on startup and credential
 changes.
+
+When the plugin's TUI part is loaded, the prompt and home footers show current
+Agent Fan Club usage, for example `AFC 5h 42% · 7d 12%`. Run `/afc` for reset
+times and in-flight reservations. The server part exposes this through the
+`agentfanclub.usage` RPC method, so the TUI never handles the raw API key.
+
+Usage refreshes after credential changes and completed sessions, with a
+five-minute periodic refresh. It reads `GET /api/usage/limits`; dollar limits are
+not exposed.
 
 See the [OpenCode v2 plugin documentation](https://opencode.ai/v2/docs/build/plugins/).

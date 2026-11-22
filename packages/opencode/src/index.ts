@@ -1,6 +1,8 @@
 import { setTimeout } from "node:timers/promises";
 import { Credential, Integration, Model, Plugin, Provider } from "@opencode/plugin";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { AfcUsage } from "./rpc";
+import { fetchUsage, UsageFetchError } from "./usage";
 
 const providerID = Provider.ID.make("agentfanclub");
 const integrationID = Integration.ID.make("agentfanclub");
@@ -210,6 +212,24 @@ export default Plugin.define({
 
     await refreshModels();
 
+    const usageRpc = await ctx.rpc.register(AfcUsage, {
+      get: async (_input, context) => {
+        const token = await activeToken();
+        if (!token) {
+          return context.error("not_connected", "Connect Agent Fan Club with /connect before checking usage.", {});
+        }
+        try {
+          return await fetchUsage(apiUrl.origin, token, lifecycle.signal);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Couldn't load Agent Fan Club usage. Try again.";
+          if (error instanceof UsageFetchError && error.status === 401) {
+            return context.error("not_connected", message, {});
+          }
+          return context.error("unavailable", message, {});
+        }
+      },
+    });
+
     const events = (async () => {
       for await (const event of ctx.event.subscribe({ signal: lifecycle.signal })) {
         if (
@@ -227,6 +247,7 @@ export default Plugin.define({
 
     return async () => {
       lifecycle.abort();
+      await usageRpc.dispose();
       await events;
     };
   },

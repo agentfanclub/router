@@ -1,5 +1,6 @@
 import { setTimeout } from "node:timers/promises";
 import type { ProviderConfig as PiProvider } from "@earendil-works/pi-coding-agent";
+import { parseUsage, type PublicUsage } from "./usage";
 
 type LoginCallbacks = Pick<Parameters<NonNullable<PiProvider["oauth"]>["login"]>[0], "onAuth" | "onProgress" | "signal">;
 type ApiModel = {
@@ -113,5 +114,21 @@ export function createProvider(client: "pi" | "oh-my-pi") {
     }));
   }
 
-  return { baseUrl: `${apiURL.origin}/inference/v1`, oauth, fetchModels };
+  async function fetchUsage(token: string | undefined, signal?: AbortSignal): Promise<PublicUsage> {
+    if (!token) throw new Error("Connect Agent Fan Club with /login before checking usage.");
+    const response = await fetch(`${apiURL.origin}/api/usage/limits`, {
+      headers: { authorization: `Bearer ${token}` },
+      redirect: "error",
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
+    });
+    if (response.status === 401) {
+      throw new Error("The Agent Fan Club API key is invalid or disabled. Sign in again with /login.");
+    }
+    if (!response.ok) throw new Error("Couldn't load Agent Fan Club usage. Check your connection and try again.");
+    const usage = parseUsage(await response.json());
+    if (!usage) throw new Error("Agent Fan Club returned invalid usage data.");
+    return usage;
+  }
+
+  return { baseUrl: `${apiURL.origin}/inference/v1`, oauth, fetchModels, fetchUsage };
 }

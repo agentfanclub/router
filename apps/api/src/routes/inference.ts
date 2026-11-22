@@ -10,6 +10,7 @@ import { catalog, modelUpstream, upstreamKeys, upstreams, type CatalogModel, typ
 import { decryptSecret } from "../util/secret-box";
 import { usageCaptureTransform } from "../util/sse-usage";
 import { diagnosticIdentifier, upstreamErrorFields } from "../util/upstream-diagnostics";
+import { publicWindow } from "../util/usage-public";
 import {
   computeCostMicro,
   deriveSessionId,
@@ -329,10 +330,10 @@ const handleChat = Effect.fn("chatCompletion")(function* (request: HttpServerReq
 function limitReached(reason: DenyReason, snapshot: UsageSnapshot, requestId: string) {
   const window = reason === "weekly_cap" ? snapshot.weekly : snapshot.fiveHour;
   const label = reason === "weekly_cap" ? "Weekly" : "Five-hour";
-  const publicWindow = (value: typeof window) => ({
-    usedPercent: value.limitMicro > 0 ? value.usedMicro / value.limitMicro * 100 : 100,
-    resetsInMs: value.resetsInMs,
-  });
+  const publicUsageWindow = (value: typeof window) => {
+    const { usedPercent, resetsInMs } = publicWindow(value, snapshot.pendingMicro);
+    return { usedPercent, resetsInMs };
+  };
   return HttpServerResponse.jsonUnsafe({
     error: {
       message: `${label} usage allowance reached. It resets in ${formatDuration(window.resetsInMs)}.`,
@@ -340,7 +341,7 @@ function limitReached(reason: DenyReason, snapshot: UsageSnapshot, requestId: st
       code: "usage_limit_reached",
       param: null,
     },
-    usage: { fiveHour: publicWindow(snapshot.fiveHour), weekly: publicWindow(snapshot.weekly) },
+    usage: { fiveHour: publicUsageWindow(snapshot.fiveHour), weekly: publicUsageWindow(snapshot.weekly) },
   }, {
     status: 429,
     headers: { "retry-after": String(Math.max(1, Math.ceil(window.resetsInMs / 1000))), "x-router-request-id": requestId },

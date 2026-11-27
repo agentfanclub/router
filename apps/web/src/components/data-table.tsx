@@ -10,8 +10,7 @@ type TableVariant =
   | "leaderboard"
   | "logs"
   | "models"
-  | "models-usage"
-  | "users";
+  | "models-usage";
 
 const variantClass: Record<TableVariant, string> = {
   "api-keys": "api-keys-table",
@@ -19,7 +18,6 @@ const variantClass: Record<TableVariant, string> = {
   logs: "logs-table",
   models: "models-table",
   "models-usage": "models-usage-table",
-  users: "users-table",
 };
 
 interface DataTableProps {

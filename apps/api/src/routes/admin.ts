@@ -4,10 +4,12 @@ import { HttpRouter, HttpServerResponse } from "effect/http";
 import { user, usageLimit, usageTotal } from "../db/schema";
 import { ApiError, decodeBody, decodeQuery, failWith } from "../http";
 import { UserSession, userAuthMiddleware } from "../middleware/user-auth";
-import { query, WorkerEnv } from "../services";
+import type { UsageSnapshot } from "../do/user-usage";
+import { query, UsageCoordinator, WorkerEnv } from "../services";
 import { upstreamKeys } from "../upstreams";
 import { dailyUsage } from "../usage-aggregates";
 import { addDays, centralDay, centralOffsetMinutes } from "../util/timezone";
+import { effectiveLimits } from "./usage";
 
 export interface LifetimeUsage {
   requests: number;
@@ -130,6 +132,17 @@ const UsageQuery = Schema.Struct({ days: Schema.optional(Schema.String) });
 // Null restores the default. Limits are whole micro-dollars up to $1M.
 const Limit = Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1_000_000_000_000)));
 const LimitsBody = Schema.Struct({ fiveHourMicro: Limit, weeklyMicro: Limit });
+const ResetBody = Schema.Struct({ window: Schema.Literals(["five_hour", "weekly"]) });
+
+// Admins see a user's live windows in micro-dollars, unlike the public view.
+export type AdminUserWindows = UsageSnapshot;
+
+const usageUnavailable = () => new ApiError({ status: 503, message: "Unable to load usage right now." });
+
+const existingUser = (id: string) => Effect.gen(function* () {
+  const [exists] = yield* query((db) => db.select({ id: user.id }).from(user).where(eq(user.id, id)).limit(1));
+  if (!exists) return yield* failWith(404, "User not found.");
+});
 
 export const adminRoutes = Layer.mergeAll(
   HttpRouter.add("GET", "/api/admin/users", Effect.fn("listUsers")(function* () {
@@ -229,8 +242,7 @@ export const adminRoutes = Layer.mergeAll(
       LimitsBody,
       "Limits must be positive whole micro-dollars, or null to use the defaults.",
     );
-    const [exists] = yield* query((db) => db.select({ id: user.id }).from(user).where(eq(user.id, id!)).limit(1));
-    if (!exists) return yield* failWith(404, "User not found.");
+    yield* existingUser(id!);
 
     const [updated] = yield* query((db) => db
       .insert(usageLimit)
@@ -238,6 +250,28 @@ export const adminRoutes = Layer.mergeAll(
       .onConflictDoUpdate({ target: usageLimit.userId, set: { fiveHourMicro, weeklyMicro } })
       .returning({ userId: usageLimit.userId, fiveHourMicro: usageLimit.fiveHourMicro, weeklyMicro: usageLimit.weeklyMicro }));
     return HttpServerResponse.jsonUnsafe(updated);
+  })),
+
+  // A user's current five-hour and weekly windows. Read-only: viewing does
+  // not start a window.
+  HttpRouter.add("GET", "/api/admin/users/:id/usage", Effect.fn("userWindows")(function* () {
+    const { id } = yield* HttpRouter.params;
+    yield* existingUser(id!);
+    const limits = yield* effectiveLimits(id!);
+    const usage = yield* UsageCoordinator;
+    const windows = yield* usage.status(id!, limits).pipe(Effect.mapError(usageUnavailable));
+    return HttpServerResponse.jsonUnsafe(windows satisfies AdminUserWindows, { headers: { "Cache-Control": "no-store" } });
+  })),
+
+  // Clears one of a user's windows so they get a full allowance again.
+  HttpRouter.add("POST", "/api/admin/users/:id/usage/reset", Effect.fn("resetUserWindow")(function* () {
+    const { id } = yield* HttpRouter.params;
+    const { window } = yield* decodeBody(ResetBody, "Window must be five_hour or weekly.");
+    yield* existingUser(id!);
+    const limits = yield* effectiveLimits(id!);
+    const usage = yield* UsageCoordinator;
+    const windows = yield* usage.reset(id!, window, limits).pipe(Effect.mapError(usageUnavailable));
+    return HttpServerResponse.jsonUnsafe(windows satisfies AdminUserWindows);
   })),
 
   HttpRouter.add("GET", "/api/admin/lumen-usage", Effect.fn("lumenUsage")(function* () {

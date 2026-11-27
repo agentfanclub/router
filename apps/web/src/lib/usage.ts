@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders, setResponseHeader } from "@tanstack/react-start/server";
 import { env } from "cloudflare:workers";
 import type { UsageLogFeed, UsageSessionFeed, UsageStatus } from "../../../api/src/routes/usage";
-import type { AdminUsage } from "../../../api/src/routes/admin";
+import type { AdminUsage, AdminUserWindows } from "../../../api/src/routes/admin";
 
 async function requestUsage<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   setResponseHeader("Cache-Control", "no-store");
@@ -53,3 +53,15 @@ export const updateUserLimits = createServerFn({ method: "POST" })
       "PUT",
       { fiveHourMicro: data.fiveHourMicro, weeklyMicro: data.weeklyMicro },
     ));
+
+export const getUserWindows = createServerFn({ method: "GET" })
+  .validator((data: { userId: string }) => data)
+  .handler(({ data }) => requestUsage<AdminUserWindows>(`/api/admin/users/${encodeURIComponent(data.userId)}/usage`));
+
+export const resetUserWindow = createServerFn({ method: "POST" })
+  .validator((data: { userId: string; window: "five_hour" | "weekly" }) => data)
+  .handler(({ data }) => requestUsage<AdminUserWindows>(
+    `/api/admin/users/${encodeURIComponent(data.userId)}/usage/reset`,
+    "POST",
+    { window: data.window },
+  ));

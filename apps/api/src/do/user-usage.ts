@@ -63,7 +63,7 @@ const SYNC_BATCH_SIZE = 20;
 const SYNC_MAX_BATCHES = 5;
 
 const WINDOW_NAMES = ["five_hour", "weekly"] as const;
-type WindowName = (typeof WINDOW_NAMES)[number];
+export type WindowName = (typeof WINDOW_NAMES)[number];
 
 const windowDurations: Record<WindowName, number> = { five_hour: FIVE_HOUR_MS, weekly: WEEK_MS };
 
@@ -130,6 +130,14 @@ export class UserUsage extends DurableObject<ApiEnv> {
     const result = this.snapshot(limits, now);
     await this.syncAlarm();
     return result;
+  }
+
+  // Clears a window's spend. The next admission starts a fresh window, and
+  // late settlements for requests from the cleared window are dropped because
+  // they no longer match its start. In-flight reservations still count.
+  async reset(window: WindowName, limits: UsageLimits): Promise<UsageSnapshot> {
+    this.exec(`DELETE FROM windows WHERE name = ?`, window);
+    return this.snapshot(limits, Date.now());
   }
 
   async alarm(): Promise<void> {

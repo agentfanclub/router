@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Context, Data, Effect, Layer } from "effect";
 import { HttpServerRespondable, HttpServerResponse } from "effect/http";
 import { createAuth } from "./auth";
-import type { AdmitInput, AdmitResult, SettleInput, UsageSnapshot, UserUsage } from "./do/user-usage";
+import type { AdmitInput, AdmitResult, SettleInput, UsageSnapshot, UserUsage, WindowName } from "./do/user-usage";
 import type { ApiEnv } from "./env";
 import type { UsageLimits } from "./util/usage";
 
@@ -40,6 +40,7 @@ export class UsageCoordinator extends Context.Service<UsageCoordinator, {
   admit(input: AdmitInput): Effect.Effect<AdmitResult, UsageUnavailable>;
   settle(userId: string, input: SettleInput): Effect.Effect<UsageSnapshot, UsageUnavailable>;
   status(userId: string, limits: UsageLimits): Effect.Effect<UsageSnapshot, UsageUnavailable>;
+  reset(userId: string, window: WindowName, limits: UsageLimits): Effect.Effect<UsageSnapshot, UsageUnavailable>;
 }>()("router/UsageCoordinator") { }
 
 function usageCoordinator(env: ApiEnv): UsageCoordinator["Service"] {
@@ -54,6 +55,7 @@ function usageCoordinator(env: ApiEnv): UsageCoordinator["Service"] {
     admit: (input) => call<AdmitResult>(input.userId, (stub) => stub.admit(input)),
     settle: (userId, input) => call<UsageSnapshot>(userId, (stub) => stub.settle(input)),
     status: (userId, limits) => call<UsageSnapshot>(userId, (stub) => stub.status(limits)),
+    reset: (userId, window, limits) => call<UsageSnapshot>(userId, (stub) => stub.reset(window, limits)),
   };
 }
 

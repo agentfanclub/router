@@ -38,8 +38,12 @@
   grid-template-columns: minmax(220px, 1fr) 148px repeat(3, 124px) 132px;
 }
 
-.users-table tr {
-  grid-template-columns: minmax(100px, 1fr) minmax(180px, 1.5fr) 72px 120px 154px 190px;
+/* Admin users accordion: chevron, name, email, role, tokens, spend, limits. */
+.users-row {
+  display: grid;
+  grid-template-columns: 36px minmax(100px, 1fr) minmax(180px, 1.5fr) 72px 120px 154px 150px;
+  align-items: center;
+  column-gap: 12px;
 }
 
 .logs-table tr {

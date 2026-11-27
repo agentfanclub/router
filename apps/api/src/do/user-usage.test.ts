@@ -152,3 +152,34 @@ describe("settlement", () => {
     expect(snapshot.fiveHour.usedMicro).toBe(0);
   });
 });
+
+describe("reset", () => {
+  test("clears one window and lets a capped user back in", async () => {
+    const usage = makeInstance();
+    await spend(usage, 10_000_000);
+    expect(await admit(usage)).toMatchObject({ decision: "deny", reason: "five_hour_cap" });
+
+    const snapshot = await usage.reset("five_hour", LIMITS);
+    expect(snapshot.fiveHour).toMatchObject({ usedMicro: 0, resetsInMs: 0 });
+    expect(snapshot.weekly.usedMicro).toBe(10_000_000);
+    expect(await admit(usage)).toMatchObject({ decision: "admit" });
+  });
+
+  test("a late settlement from before the reset is not charged to the new window", async () => {
+    const usage = makeInstance();
+    const requestId = crypto.randomUUID();
+    const start = Date.now();
+    const clock = spyOn(Date, "now").mockReturnValue(start);
+    await admit(usage, { requestId });
+    await usage.reset("weekly", LIMITS);
+    clock.mockReturnValue(start + 1_000);
+    await spend(usage, 100);
+    clock.mockRestore();
+    const snapshot = await usage.settle({
+      requestId, route: "lumen", usage: { inputTokens: 1, outputTokens: 1, cachedTokens: 0 },
+      chargeMicro: 5_000, costMicro: 5_000, status: "ok", durationMs: 1, limits: LIMITS,
+    });
+    expect(snapshot.weekly.usedMicro).toBe(100);
+    expect(snapshot.fiveHour.usedMicro).toBe(5_100);
+  });
+});

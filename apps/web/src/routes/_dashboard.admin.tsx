@@ -1,11 +1,12 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { ChevronRight } from "lucide-react";
 import { DailyUsage, type ChartUnit } from "../components/daily-usage";
 import { useEffect, useState } from "react";
 import { getSession } from "../lib/session";
 import { getLifetimeUsage, getLumenUsage, listUsers } from "../lib/admin";
-import { getAdminUsage, updateUserLimits } from "../lib/usage";
-import { formatUsdMicro, localTimeZoneLabel } from "../lib/format";
-import type { AdminUsers, LumenUsage } from "../../../api/src/routes/admin";
+import { getAdminUsage, getUserWindows, resetUserWindow, updateUserLimits } from "../lib/usage";
+import { formatDurationMs, formatUsdMicro, localTimeZoneLabel } from "../lib/format";
+import type { AdminUser, AdminUserWindows, AdminUsers, LumenUsage } from "../../../api/src/routes/admin";
 import { DataTable, TableBody, TableHead, Td, Th } from "../components/data-table";
 
 export const DEFAULT_FIVE_HOUR_LIMIT_MICRO = 10_000_000;
@@ -171,51 +172,26 @@ function UsersTable({ initial }: { initial: AdminUsers }) {
   return (
     <section className="mb-6" aria-labelledby="users-heading" aria-busy={loading}>
       <h2 id="users-heading" className="text-base font-medium">Users</h2>
-      <p className="mt-1 text-sm text-neutral-500">Sorted by lifetime tokens, highest first. Spend and sessions are lifetime totals.</p>
-      <DataTable variant="users" minWidth={920} caption="Users ranked by lifetime token usage, with lifetime spend and usage limits." className="mt-6">
-        <TableHead>
-          <Th pad="start" className="px-5">Name</Th>
-          <Th>Email</Th>
-          <Th>Role</Th>
-          <Th>Lifetime tokens</Th>
-          <Th title="Charged at router prices, and what upstreams charged the club">Charged / our cost</Th>
-          <Th pad="end" className="px-5">Limits (5h / week)</Th>
-        </TableHead>
-        <TableBody
-          rows={result.users}
-          rowKey={(user) => user.id}
-          columns={6}
-          empty="No users yet."
-          renderRow={(user) => (
-            <>
-              <Td pad="start" className="truncate px-5 text-neutral-800" title={user.name}>{user.name || "—"}</Td>
-              <Td className="truncate" title={user.email}>{user.email}</Td>
-              <Td>
-                <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
-              </Td>
-              <Td className="tabular-nums">{user.totalTokens.toLocaleString("en-US")}</Td>
-              <Td className="whitespace-nowrap tabular-nums">
-                <span className="text-neutral-800">{formatUsdMicro(user.clubChargeMicro)}</span>
-                <span className="text-neutral-400" title="What upstreams charged the club"> / {formatUsdMicro(user.costMicro)}</span>
-                {user.personalChargeMicro > 0 && (
-                  <span className="block text-xs text-neutral-400" title="Usage on the user's personal key, at router prices">
-                    + {formatUsdMicro(user.personalChargeMicro)} personal
-                  </span>
-                )}
-                <span className="block text-xs text-neutral-400">{user.sessions.toLocaleString("en-US")} {user.sessions === 1 ? "session" : "sessions"}</span>
-              </Td>
-              <Td pad="end" className="px-5">
-                <LimitsEditor
-                  key={`${user.id}:${user.fiveHourMicro}:${user.weeklyMicro}`}
-                  userId={user.id}
-                  fiveHourMicro={user.fiveHourMicro}
-                  weeklyMicro={user.weeklyMicro}
-                />
-              </Td>
-            </>
-          )}
-        />
-      </DataTable>
+      <p className="mt-1 text-sm text-neutral-500">
+        Sorted by lifetime tokens, highest first. Spend and sessions are lifetime totals. Expand a user to see their current windows and limits.
+      </p>
+      <div className="dashboard-table-frame mt-6 max-w-[960px] overflow-x-auto bg-[#eeeeee] text-sm text-neutral-600">
+        <div style={{ minWidth: 860 }}>
+          <div aria-hidden="true" className="users-row py-2.5 pr-5 font-medium text-neutral-500">
+            <span />
+            <span>Name</span>
+            <span>Email</span>
+            <span>Role</span>
+            <span>Lifetime tokens</span>
+            <span title="Charged at router prices, and what upstreams charged the club">Charged / our cost</span>
+            <span>Limits (5h / week)</span>
+          </div>
+          <ul className="overflow-hidden rounded-[12px] bg-white">
+            {result.users.map((user) => <UserRow key={user.id} user={user} />)}
+            {result.users.length === 0 && <li className="px-6 py-8 text-center text-neutral-500">No users yet.</li>}
+          </ul>
+        </div>
+      </div>
       <div className="mt-3 flex items-center justify-between text-sm">
         <button type="button" disabled={loading || result.page === 0} onClick={() => setPage(result.page - 1)} className="rounded border border-neutral-200 px-3 py-1.5 disabled:opacity-40">Previous</button>
         <span role="status" className="text-neutral-500">{loading ? "Loading users…" : `Page ${result.page + 1}`}</span>
@@ -223,6 +199,149 @@ function UsersTable({ initial }: { initial: AdminUsers }) {
       </div>
       {error && <p role="alert" className="mt-2 text-sm text-red-700">{error} <button type="button" className="underline" onClick={() => setRetry((value) => value + 1)}>Retry</button></p>}
     </section>
+  );
+}
+
+function UserRow({ user }: { user: AdminUser }) {
+  const [open, setOpen] = useState(false);
+  const fiveHour = user.fiveHourMicro ?? DEFAULT_FIVE_HOUR_LIMIT_MICRO;
+  const weekly = user.weeklyMicro ?? DEFAULT_WEEKLY_LIMIT_MICRO;
+
+  return (
+    <li className="border-b border-neutral-100 last:border-b-0">
+      <details className="group" onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <summary className="users-row cursor-pointer list-none py-3 pr-5 hover:bg-neutral-50 [&::-webkit-details-marker]:hidden">
+          <ChevronRight aria-hidden="true" className="size-4 justify-self-center text-neutral-400 transition-transform group-open:rotate-90" />
+          <span className="truncate text-neutral-800" title={user.name}>{user.name || "—"}</span>
+          <span className="truncate" title={user.email}>{user.email}</span>
+          <span>
+            <span className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs">{user.role}</span>
+          </span>
+          <span className="tabular-nums">{user.totalTokens.toLocaleString("en-US")}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            <span className="text-neutral-800">{formatUsdMicro(user.clubChargeMicro)}</span>
+            <span className="text-neutral-400"> / {formatUsdMicro(user.costMicro)}</span>
+          </span>
+          <span className="whitespace-nowrap tabular-nums">
+            {formatUsdMicro(fiveHour)} / {formatUsdMicro(weekly)}
+            {(user.fiveHourMicro !== null || user.weeklyMicro !== null) && <span className="ml-1 text-xs text-neutral-400">custom</span>}
+          </span>
+        </summary>
+        {open && (
+          <div className="grid gap-5 border-t border-neutral-100 bg-neutral-50/60 px-5 py-4 pl-12">
+            <UserWindows
+              key={`${fiveHour}:${weekly}`}
+              userId={user.id}
+              name={user.name || user.email}
+            />
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+              <div>
+                <h3 className="text-xs font-medium text-neutral-500">Limits</h3>
+                <LimitsEditor
+                  key={`${user.id}:${user.fiveHourMicro}:${user.weeklyMicro}`}
+                  userId={user.id}
+                  fiveHourMicro={user.fiveHourMicro}
+                  weeklyMicro={user.weeklyMicro}
+                />
+              </div>
+              <dl className="flex gap-6 text-xs">
+                {([
+                  ["Requests", user.requests.toLocaleString("en-US")],
+                  ["Sessions", user.sessions.toLocaleString("en-US")],
+                  ["Personal key", formatUsdMicro(user.personalChargeMicro)],
+                ] as const).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-neutral-500">{label}</dt>
+                    <dd className="mt-1 tabular-nums text-neutral-800">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        )}
+      </details>
+    </li>
+  );
+}
+
+const WINDOW_LABELS = { five_hour: "5-hour window", weekly: "Weekly window" } as const;
+
+function UserWindows({ userId, name }: { userId: string; name: string }) {
+  const [windows, setWindows] = useState<AdminUserWindows | null>(null);
+  const [error, setError] = useState("");
+  const [resetting, setResetting] = useState<keyof typeof WINDOW_LABELS | null>(null);
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError("");
+    void getUserWindows({ data: { userId } }).then(
+      (result) => { if (!cancelled) setWindows(result); },
+      (error: unknown) => { if (!cancelled) setError(error instanceof Error ? error.message : "Couldn't load usage."); },
+    );
+    return () => { cancelled = true; };
+  }, [userId, retry]);
+
+  async function reset(window: keyof typeof WINDOW_LABELS) {
+    if (!confirm(`Reset ${name}'s ${WINDOW_LABELS[window].toLowerCase()}? Their spend in it goes back to $0.`)) return;
+    setResetting(window);
+    setError("");
+    try {
+      setWindows(await resetUserWindow({ data: { userId, window } }));
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : "Couldn't reset usage.");
+    } finally {
+      setResetting(null);
+    }
+  }
+
+  if (!windows) {
+    return error
+      ? <p role="alert" className="text-sm text-red-700">{error} <button type="button" className="underline" onClick={() => setRetry((value) => value + 1)}>Retry</button></p>
+      : <p role="status" className="text-sm text-neutral-500">Loading current usage…</p>;
+  }
+
+  return (
+    <div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(["five_hour", "weekly"] as const).map((key) => {
+          const window = key === "five_hour" ? windows.fiveHour : windows.weekly;
+          const percent = window.limitMicro > 0 ? Math.min(100, (window.usedMicro / window.limitMicro) * 100) : 0;
+          const capped = window.usedMicro >= window.limitMicro;
+          return (
+            <div key={key} className="rounded-lg border border-neutral-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-medium text-neutral-500">{WINDOW_LABELS[key]}</h3>
+                  <p className="mt-1 tabular-nums text-neutral-800">
+                    {formatUsdMicro(window.usedMicro)} <span className="text-neutral-400">of {formatUsdMicro(window.limitMicro)}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={resetting !== null || window.usedMicro === 0}
+                  onClick={() => void reset(key)}
+                  className="cursor-pointer rounded border border-neutral-200 px-2.5 py-1 text-xs text-neutral-700 hover:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {resetting === key ? "Resetting…" : "Reset"}
+                </button>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-100" role="progressbar" aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100} aria-label={`${WINDOW_LABELS[key]} used`}>
+                <div className={capped ? "h-full bg-red-600" : "h-full bg-neutral-800"} style={{ width: `${percent}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-neutral-500">
+                {window.resetsInMs > 0 ? `Resets in ${formatDurationMs(window.resetsInMs)}` : "Not started. Starts on the next request."}
+                {capped && <span className="text-red-700"> · Limit reached</span>}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      {windows.pendingMicro > 0 && (
+        <p className="mt-2 text-xs text-neutral-500">{formatUsdMicro(windows.pendingMicro)} reserved for in-flight requests counts toward both windows.</p>
+      )}
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+    </div>
   );
 }
 
@@ -310,7 +429,6 @@ function LimitsEditor({ userId, fiveHourMicro, weeklyMicro }: {
     setError("");
     try {
       await updateUserLimits({ data: { userId, fiveHourMicro: fiveHour, weeklyMicro: weekly } });
-      (event.target as HTMLFormElement).closest("details")?.removeAttribute("open");
       await router.invalidate();
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Couldn't save limits.");
@@ -320,46 +438,40 @@ function LimitsEditor({ userId, fiveHourMicro, weeklyMicro }: {
   }
 
   return (
-    <details className="group">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs tabular-nums text-neutral-700 hover:border-neutral-400">
-        {formatUsdMicro(effectiveFiveHour)} / {formatUsdMicro(effectiveWeekly)}
-        <span className="text-neutral-400 group-open:hidden">edit</span>
-      </summary>
-      <form onSubmit={save} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-        <label className="flex items-center gap-1">
-          <span className="text-neutral-500">5h $</span>
-          <input
-            name="fiveHour"
-            type="number"
-            min="0"
-            step="0.5"
-            defaultValue={fiveHourMicro === null ? "" : fiveHourMicro / 1_000_000}
-            placeholder={String(effectiveFiveHour / 1_000_000)}
-            className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          <span className="text-neutral-500">week $</span>
-          <input
-            name="weekly"
-            type="number"
-            min="0"
-            step="0.5"
-            defaultValue={weeklyMicro === null ? "" : weeklyMicro / 1_000_000}
-            placeholder={String(effectiveWeekly / 1_000_000)}
-            className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={busy}
-          className="cursor-pointer rounded bg-neutral-800 px-2.5 py-1 text-white disabled:cursor-wait disabled:text-neutral-400"
-        >
-          {busy ? "Saving…" : "Save"}
-        </button>
-        {error && <span role="alert" className="text-red-700">{error}</span>}
-        <span className="w-full text-neutral-400">Empty fields fall back to the club defaults.</span>
-      </form>
-    </details>
+    <form onSubmit={save} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+      <label className="flex items-center gap-1">
+        <span className="text-neutral-500">5h $</span>
+        <input
+          name="fiveHour"
+          type="number"
+          min="0"
+          step="0.5"
+          defaultValue={fiveHourMicro === null ? "" : fiveHourMicro / 1_000_000}
+          placeholder={String(effectiveFiveHour / 1_000_000)}
+          className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        <span className="text-neutral-500">week $</span>
+        <input
+          name="weekly"
+          type="number"
+          min="0"
+          step="0.5"
+          defaultValue={weeklyMicro === null ? "" : weeklyMicro / 1_000_000}
+          placeholder={String(effectiveWeekly / 1_000_000)}
+          className="w-20 rounded border border-neutral-200 px-1.5 py-1 tabular-nums"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={busy}
+        className="cursor-pointer rounded bg-neutral-800 px-2.5 py-1 text-white disabled:cursor-wait disabled:text-neutral-400"
+      >
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {error && <span role="alert" className="text-red-700">{error}</span>}
+      <span className="w-full text-neutral-400">Empty fields fall back to the club defaults.</span>
+    </form>
   );
 }

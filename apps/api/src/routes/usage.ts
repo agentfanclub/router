@@ -52,7 +52,7 @@ export interface UsageSessionFeed {
   hasMore: boolean;
 }
 
-const effectiveLimits = (userId: string) => query((db) => db
+export const effectiveLimits = (userId: string) => query((db) => db
   .select({ fiveHourMicro: usageLimit.fiveHourMicro, weeklyMicro: usageLimit.weeklyMicro })
   .from(usageLimit)
   .where(eq(usageLimit.userId, userId))
